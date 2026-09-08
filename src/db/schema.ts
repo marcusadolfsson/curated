@@ -38,7 +38,7 @@ export const posts = sqliteTable(
     /** The emoji the model picked for this post; what actually gets sent. */
     suggestedReaction: text("suggestedReaction"),
 
-    // Reaction sent back to the sender, so she can see it landed
+    // Reaction sent back to the sender, so they can see it landed
     reactedAt: integer("reactedAt", { mode: "timestamp" }),
     reactionEmoji: text("reactionEmoji"),
     reactionError: text("reactionError"),

@@ -81,7 +81,7 @@ export default function PostChrome({
   const [drafting, setDrafting] = useState(false);
   const [hasDraft, setHasDraft] = useState(Boolean(post.draftReply));
 
-  const senderName = post.senderUsername?.split(" ")[0] ?? "her";
+  const senderName = post.senderUsername?.split(" ")[0] ?? "the sender";
 
   const box = useRef<HTMLTextAreaElement>(null);
   const grow = (element: HTMLTextAreaElement) => {
@@ -326,7 +326,7 @@ export default function PostChrome({
       }}
     >
       <label className="block">
-        <span className="sr-only">Reply to her about this post</span>
+        <span className="sr-only">Reply to the sender about this post</span>
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -579,7 +579,7 @@ export default function PostChrome({
             }}
           >
             <label className="block">
-              <span className="sr-only">Reply to her about this post</span>
+              <span className="sr-only">Reply to the sender about this post</span>
               {/* Return writes a new line; Send sends. The box grows to what
                   you have written rather than hiding it behind a scrollbar. */}
               <textarea

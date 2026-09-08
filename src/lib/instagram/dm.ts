@@ -179,7 +179,7 @@ export function collectMessages(items: Json[]): ChatMessage[] {
 }
 
 /**
- * Shared posts from a page of messages, with her commentary attached.
+ * Shared posts from a page of messages, with the sender's commentary attached.
  *
  * She comments on a share in a *separate* message - "The brown glass is a
  * vibeee" arrives just after the reel, not inside it. Reading one message at a

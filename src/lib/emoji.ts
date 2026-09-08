@@ -3,7 +3,7 @@
  *
  * Deliberately short. Instagram's own reaction tray is a small set, a reaction
  * is a gesture rather than a review, and a fixed heart on everything says
- * nothing - the point is that the right one tells her you actually looked.
+ * nothing - the point is that the right one says you actually looked.
  */
 export const REACTIONS = [
   { emoji: "❤️", means: "love it, or it is simply beautiful" },

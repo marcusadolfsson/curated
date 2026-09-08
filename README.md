@@ -5,7 +5,7 @@ read and summarised so you can tell at a glance what it is — and reacted to in
 the thread, so they know it landed.
 
 Built for one person and one conversation: someone sends you reels faster than
-you watch them, and a list of anonymous thumbnails is not a way to keep up.
+you watch them, and Instagram is built to pull you off the one you opened.
 
 ## Why it exists
 

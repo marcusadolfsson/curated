@@ -113,7 +113,7 @@ async function record(post: Post, outcome: ReactionOutcome, emoji: string): Prom
  * to it a few minutes later - or, if it came in at night, in the morning - and
  * two posts that arrived together get two separate reactions, minutes apart.
  * Only posts that arrived in the last day qualify: reacting to last month's
- * post is a bot catching up, and she would notice.
+ * post is a bot catching up, and the sender would notice.
  *
  * In-process only. A restart drops the queue; a dropped reaction is nothing.
  */
