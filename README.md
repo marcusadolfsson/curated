@@ -13,7 +13,7 @@ Someone you love lives on Instagram. You would rather not.
 
 That is the whole problem. Staying means the feed, the suggestions, the pull —
 an app built so that going in for one reel costs you twenty minutes. Leaving
-means losing the things she sends you and the small conversation that goes with
+means losing the things they send you and the small conversation that goes with
 them, which was never the part you wanted to be rid of.
 
 This takes the second without the first. What arrives here is exactly what one
@@ -26,14 +26,14 @@ unusable inside Instagram itself:
 
 - **A swipe up goes to the algorithm.** Opening a shared reel works fine;
   leaving it is the problem. Swipe up and Instagram answers with its own
-  recommendations rather than the next thing she sent, so every post means
+  recommendations rather than the next thing they sent, so every post means
   backing out to the thread and finding your place again.
 - **Reacting means going back as well** — return to the message, press it,
   choose. For every single one.
 - **Nothing tracks what you have already seen.** A hundred shares in, there is
   no way to tell which ones you have watched, so the backlog only grows.
 
-Here the pile is the interface. A swipe moves to the next thing she sent. The
+Here the pile is the interface. A swipe moves to the next thing they sent. The
 reactions are under your thumb while you are watching. Read and unread are the
 spine of the whole thing, so the pile empties instead of accumulating.
 
