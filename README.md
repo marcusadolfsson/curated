@@ -7,6 +7,27 @@ the thread, so they know it landed.
 Built for one person and one conversation: someone sends you reels faster than
 you watch them, and Instagram is built to pull you off the one you opened.
 
+## What it looks like
+
+The pile, newest first, with a colour down the left edge per category. Reading a
+post recedes it without moving it, so the list empties from the top rather than
+reshuffling under you.
+
+![The feed](docs/feed.png)
+
+On a phone it is the same list, and a post opens full screen with the reactions
+under your thumb. The card carries what the model made of it: a description, the
+concrete things it names, and whatever the sender typed alongside the share.
+
+<p align="center">
+  <img src="docs/feed-phone.png" alt="The feed on a phone" width="300">
+  <img src="docs/details-phone.png" alt="A post, with its details open" width="300">
+</p>
+
+Every post, sender and thumbnail above is invented, and the pictures are
+placeholders. Screenshots of the real thing would be someone's private
+messages.
+
 ## Why it exists
 
 Someone you love lives on Instagram. You would rather not.
