@@ -367,3 +367,13 @@ requests to Instagram.
   that suddenly finds nothing usually means a message shape changed.
 - A session cookie is the only way in. Instagram challenges automated logins
   from a new device or location, and the login endpoint is throttled by IP.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
+
+It drives Instagram with a real browser and a real session, which is yours to
+account for: automation is against their terms, and an account driven hard
+enough gets locked. The pacing here is deliberately slow for that reason. Run
+it on your own account, and read the safety rails above before changing any of
+the waits.
