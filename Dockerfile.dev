@@ -1,0 +1,13 @@
+# Development image - hot reload, same Chromium as production.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+RUN mkdir -p /app/data
+
+EXPOSE 3000
+CMD ["npm", "run", "dev"]

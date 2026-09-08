@@ -1,0 +1,21 @@
+services:
+  insta-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "127.0.0.1:3011:3000"
+    environment:
+      - NODE_ENV=development
+      - DATA_DIR=/app/data
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+      - insta-data:/app/data
+    shm_size: 1gb
+    command: npm run dev
+
+volumes:
+  insta-data:

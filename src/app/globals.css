@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #eaebe4;
+  --surface: #f7f7f2;
+  --surface-sunk: #e3e5dc;
+  --ink: #1b1e1a;
+  --ink-soft: #444942;
+  --muted: #6e736a;
+  --line: #d2d5c9;
+  --accent: #2f5d50;
+  --danger: #8c3a2b;
+  --spine-lightness: 0.52;
+  --spine-chroma: 0.13;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #16180f;
+    --surface: #1e2118;
+    --surface-sunk: #191c14;
+    --ink: #e8e9df;
+    --ink-soft: #c2c5b7;
+    --muted: #8b9083;
+    --line: #2f332a;
+    --accent: #7fc0aa;
+    --danger: #e08c78;
+    --spine-lightness: 0.72;
+    --spine-chroma: 0.12;
+  }
+}
+
+/* Sequential ramp for the report. One hue, light to dark - magnitude, not
+   identity - with the steps chosen for monotonic lightness against each
+   surface rather than flipped automatically. */
+:root {
+  --heat-0: #f1f2ee;
+  --heat-1: #dfe7e1;
+  --heat-2: #c0d4ca;
+  --heat-3: #97bcac;
+  --heat-4: #6aa08d;
+  --heat-5: #41806e;
+  --heat-6: #2f5d50;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --heat-0: #1a1d16;
+    --heat-1: #20302a;
+    --heat-2: #27453b;
+    --heat-3: #2f6152;
+    --heat-4: #3c8570;
+    --heat-5: #5aab95;
+    --heat-6: #7fc0aa;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-sunk: var(--surface-sunk);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), Iowan Old Style, Georgia, serif;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--paper);
+  padding-top: env(safe-area-inset-top);
+  color: var(--ink);
+}
+
+/* The category spine: one hue per category, set per row. */
+.spine {
+  background: oklch(var(--spine-lightness) var(--spine-chroma) var(--hue, 220));
+}
+
+.dot {
+  background: oklch(var(--spine-lightness) var(--spine-chroma) var(--hue, 220));
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* iOS zooms the page into any field whose text is under 16px, so this is a
+   floor before it is a size - and since it overrides whatever a field asks
+   for, it is also what the boxes you type in actually end up at. Seventeen
+   reads more easily than the bare minimum and still clears the bar. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 17px !important;
+  }
+}

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Curated, as a login agent.
+
+  A LaunchAgent rather than a LaunchDaemon on purpose: it has to run inside the
+  logged-in user's session, because it drives a real Chromium and because the
+  Claude Agent SDK reads this account's own ~/.claude rather than an API key.
+  A daemon has neither.
+
+  Install:
+    cp deploy/mac/com.curated.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.curated.plist
+  Stop:
+    launchctl unload -w ~/Library/LaunchAgents/com.curated.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.curated.app</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>REPO/deploy/mac/run.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPO</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Restarting in a tight loop would hammer Instagram on every boot. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>REPO/data/curated.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPO/data/curated.log</string>
+</dict>
+</plist>

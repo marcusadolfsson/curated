@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+CuratedBar.app/
+*.png

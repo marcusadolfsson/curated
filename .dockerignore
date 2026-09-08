@@ -1,0 +1,47 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Build output
+.next
+out
+build
+
+# Database
+*.db
+*.db-journal
+
+# Environment files (will be passed via docker-compose)
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+README.md
+*.md
+
+# Testing
+coverage
+.nyc_output
+
+# app data: database, media, instagram session
+data

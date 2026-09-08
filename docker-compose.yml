@@ -1,0 +1,59 @@
+# Not how this is deployed. Curated runs natively on a Mac as a login agent;
+# see deploy/mac/. This file is kept so the app can still be built and run on
+# Linux for testing, and as the rollback if the Mac ever has to hand back.
+#
+# The cloud box that used to run this joined a shared `edge` network so the
+# Cloudflare connector could reach the app as `insta:3000` rather than through
+# a published port. Reinstating that means adding, alongside the service:
+#
+#     networks:
+#       default: {}
+#       edge:
+#         aliases: [insta]
+#
+# and at the top level:
+#
+#     networks:
+#       default: {}
+#       edge:
+#         external: true
+#
+# with the `ports:` block below removed, since nothing would need it.
+
+services:
+  insta:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # Loopback only: nginx is the only thing that should reach it, and this
+      # box runs a public nginx. INSTA_PORT lets a second copy run for testing.
+      - "127.0.0.1:${INSTA_PORT:-3010}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/app/data
+      # Containers default to UTC; the report buckets send times in local time.
+      - TZ=${TZ:-America/New_York}
+      # How many posts are described at once - each is its own agent process.
+      - ANALYSIS_CONCURRENCY=${ANALYSIS_CONCURRENCY:-3}
+      # The analysis agent's credentials: a long-lived token from
+      # `claude setup-token`, which is the same mechanism the Mac uses.
+      #
+      # This replaced bind-mounting ~/.claude. That only worked when the host
+      # uid happened to be 1001, and it handed the container every credential
+      # and project record in there to read one token. Set it in .env, or pass
+      # the Mac's own file through:
+      #
+      #   CLAUDE_CODE_OAUTH_TOKEN=$(cat ~/.curated/claude-token) \
+      #     docker compose up -d
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      # Database, thumbnails, videos and the Instagram session. This was an
+      # absolute path into one particular home directory, which meant the
+      # documented Docker path only worked on the box it was written on.
+      - ${CURATED_DATA:-./data}:/app/data
+      # Nothing else is mounted. The Claude credential arrives as a token in
+      # the environment, so ~/.claude stays on the host.
+    # Chromium needs more than the default 64MB of shared memory.
+    shm_size: 1gb
+    restart: unless-stopped
