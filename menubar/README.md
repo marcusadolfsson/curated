@@ -22,6 +22,17 @@ Requires the Swift toolchain that ships with Xcode. There is no `.xcodeproj`:
 this is a Swift package plus a short Makefile that assembles the bundle, which
 keeps the whole thing editable and buildable from a terminal.
 
+**`make install` does not restart what is running, and neither does
+`launchctl kickstart`.** The login agent runs `open -a CuratedBar.app`, and
+`open` on an app that is already running activates it rather than starting it
+again - so the new binary sits in `~/Applications` while the old one keeps
+running, and a change appears to have done nothing. Quit it first:
+
+```bash
+pkill -f "CuratedBar.app/Contents/MacOS/CuratedBar"
+launchctl kickstart gui/$(id -u)/com.curated.menubar
+```
+
 ## Signing, and why it matters for autostart
 
 The build signs with a real certificate when one is available, preferring

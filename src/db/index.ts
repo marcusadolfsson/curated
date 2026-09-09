@@ -32,13 +32,27 @@ function open(): Db {
 
   const db = drizzle(sqlite, { schema });
 
-  const migrationsFolder = path.join(process.cwd(), "drizzle");
+  // Overridable because a packaged build does not run from the repo, and the
+  // working directory it does run from is the packager's business rather than
+  // something to be assumed here.
+  const migrationsFolder = process.env.MIGRATIONS_DIR
+    ? path.resolve(process.env.MIGRATIONS_DIR)
+    : path.join(process.cwd(), "drizzle");
+
   if (fs.existsSync(migrationsFolder)) {
     try {
       migrate(db, { migrationsFolder });
     } catch (error) {
       console.error("[db] migration failed:", error);
     }
+  } else {
+    // Loudly. This used to pass in silence, which is the wrong way round: a
+    // missing migrations folder means the schema stays at whatever the file
+    // happens to hold, and the failures turn up later as missing columns.
+    console.error(
+      `[db] no migrations at ${migrationsFolder} - the schema will be whatever ` +
+        `the database already had. Set MIGRATIONS_DIR if they live elsewhere.`,
+    );
   }
 
   return db;

@@ -95,14 +95,60 @@ struct CuratedAPI {
         try await HTTP.get(SignInPayload.self, from: base.appending(path: "api/session/signin"))
     }
 
-    /// The one write this app makes. Opens Instagram's login page in Curated's
-    /// own browser; the app stops reading Instagram while it stands open.
+    func claudeToken() async throws -> ClaudeTokenPayload {
+        try await HTTP.get(ClaudeTokenPayload.self, from: base.appending(path: "api/claude/token"))
+    }
+
+    // MARK: - The writes
+    //
+    // Signing in and out, and the analysis credential. Each one is something
+    // you reach for when the app has stopped doing its job, which is when the
+    // menu bar is where you are looking. Everything else here stays a read.
+
+    /// Opens Instagram's login page in Curated's own browser. The app stops
+    /// reading Instagram while the window stands open.
     @discardableResult
     func beginSignIn() async throws -> SignInPayload {
-        var request = URLRequest(url: base.appending(path: "api/session/signin"))
-        request.httpMethod = "POST"
+        try await write("api/session/signin", method: "POST", body: nil, as: SignInPayload.self)
+    }
+
+    /// Deletes the saved session. The app cannot read anything afterwards
+    /// until somebody signs in again.
+    func signOut() async throws {
+        var request = URLRequest(url: base.appending(path: "api/session"))
+        request.httpMethod = "DELETE"
+        _ = try await HTTP.session.data(for: request)
+    }
+
+    @discardableResult
+    func setClaudeToken(_ token: String) async throws -> ClaudeTokenPayload {
+        try await write(
+            "api/claude/token",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: ["token": token]),
+            as: ClaudeTokenPayload.self
+        )
+    }
+
+    @discardableResult
+    func clearClaudeToken() async throws -> ClaudeTokenPayload {
+        try await write("api/claude/token", method: "DELETE", body: nil, as: ClaudeTokenPayload.self)
+    }
+
+    private func write<T: Decodable>(
+        _ path: String,
+        method: String,
+        body: Data?,
+        as type: T.Type
+    ) async throws -> T {
+        var request = URLRequest(url: base.appending(path: path))
+        request.httpMethod = method
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         let (data, _) = try await HTTP.session.data(for: request)
-        return try JSON.decoder.decode(SignInPayload.self, from: data)
+        return try JSON.decoder.decode(T.self, from: data)
     }
 
     /// Returns every post as well as the counts, so this is deliberately on a

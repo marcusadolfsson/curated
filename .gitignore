@@ -47,3 +47,12 @@ next-env.d.ts
 
 # app data (sqlite db, thumbnails, instagram session)
 /data
+
+# local tool permissions, per machine
+.claude/settings.local.json
+
+# the assembled server; built, never committed
+/dist
+
+# the downloaded Node runtime, cached for the app bundle
+/.cache
