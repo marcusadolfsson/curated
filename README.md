@@ -20,9 +20,14 @@ under your thumb. The card carries what the model made of it: a description, the
 concrete things it names, and whatever the sender typed alongside the share.
 
 <p align="center">
-  <img src="docs/feed-phone.png" alt="The feed on a phone" width="300">
-  <img src="docs/details-phone.png" alt="A post, with its details open" width="300">
+  <img src="docs/feed-phone.png" alt="The feed on a phone" width="240">
+  <img src="docs/reel-phone.png" alt="A reel playing full screen" width="240">
+  <img src="docs/details-phone.png" alt="A post, with its details open" width="240">
 </p>
+
+A reel plays full screen, in the app, with the reactions along the bottom and
+the sender's message over the foot of it. A swipe up is the next thing they
+sent rather than whatever Instagram would rather show you.
 
 Every post, sender and thumbnail above is invented, and the pictures are
 placeholders. Screenshots of the real thing would be someone's private
