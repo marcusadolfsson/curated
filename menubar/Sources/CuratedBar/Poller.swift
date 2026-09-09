@@ -67,6 +67,16 @@ final class Poller {
         Task { await refresh() }
     }
 
+    /// Open the sign-in window, then look again so the menu shows it standing
+    /// open rather than waiting out the next tick.
+    func beginSignIn() {
+        Task {
+            let api = CuratedAPI(base: config.localBase)
+            _ = try? await api.beginSignIn()
+            await refresh()
+        }
+    }
+
     func refresh() async {
         refreshing = true
         defer { refreshing = false }
@@ -92,6 +102,7 @@ final class Poller {
         if next.appReachable {
             next.sync = try? await api.sync()
             next.session = try? await api.session()
+            next.signIn = try? await api.signIn()
 
             if Date().timeIntervalSince(lastCountsCheck) >= countsInterval {
                 if let counts = try? await api.counts() {

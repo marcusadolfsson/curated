@@ -15,6 +15,17 @@ type LoginOutcome = {
   message?: string;
 };
 
+type SignInState = {
+  phase: "idle" | "opening" | "waiting" | "verifying" | "done" | "failed" | "cancelled";
+  message: string;
+  username: string | null;
+  startedAt: string | null;
+  paused: boolean;
+};
+
+/** The phases where a window is up and the app is waiting on a person. */
+const WORKING = ["opening", "waiting", "verifying"];
+
 export default function SessionPanel({ onChange }: { onChange: () => void }) {
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [sessionId, setSessionId] = useState("");
@@ -65,6 +76,51 @@ export default function SessionPanel({ onChange }: { onChange: () => void }) {
     }
   };
 
+  /**
+   * Sign in at a window instead of pasting.
+   *
+   * The request comes back as soon as the window is up, because what happens
+   * next is somebody typing - so the state is polled from there. The app's own
+   * browser is down while it stands open, which is worth saying on screen
+   * rather than leaving the feed to look broken.
+   */
+  const openWindow = async () => {
+    setMessage(null);
+    const response = await fetch("/api/session/signin", { method: "POST" });
+    setSignIn((await response.json()) as SignInState);
+  };
+
+  const cancelWindow = async () => {
+    const response = await fetch("/api/session/signin", { method: "DELETE" });
+    setSignIn((await response.json()) as SignInState);
+  };
+
+  const [signIn, setSignIn] = useState<SignInState | null>(null);
+  const working = signIn ? WORKING.includes(signIn.phase) : false;
+
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(async () => {
+      const response = await fetch("/api/session/signin");
+      if (!response.ok) return;
+      const next = (await response.json()) as SignInState;
+      setSignIn(next);
+      if (!WORKING.includes(next.phase)) {
+        if (next.phase === "done") {
+          setMessage({
+            tone: "info",
+            text: next.username ? `Signed in as ${next.username}.` : "Signed in.",
+          });
+        } else if (next.phase === "failed") {
+          setMessage({ tone: "error", text: next.message || "That did not work." });
+        }
+        await refresh();
+      }
+    }, 1500);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [working]);
+
   const signOut = async () => {
     setBusy(true);
     await fetch("/api/session", { method: "DELETE" });
@@ -113,8 +169,49 @@ export default function SessionPanel({ onChange }: { onChange: () => void }) {
           {status?.message && (
             <p className="border-l-2 border-danger pl-3 text-[13px] text-danger">{status.message}</p>
           )}
-          <div className="text-[13px] text-muted">
-            <p>Sign in at instagram.com on your own machine, then:</p>
+          {working ? (
+            <div className="border-l-2 border-accent pl-3 text-[13px]">
+              <p className="text-ink">
+                {signIn?.phase === "verifying"
+                  ? "Checking the session."
+                  : "Sign in at the window that opened."}
+              </p>
+              <p className="mt-1 text-muted">
+                Curated is not reading Instagram while it is open - the window and the app
+                share one browser. Two-factor prompts and checkpoints are just pages: deal
+                with them there.
+              </p>
+              <button
+                type="button"
+                onClick={() => void cancelWindow()}
+                className="mt-2 text-muted underline underline-offset-4 hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => void openWindow()}
+                disabled={busy}
+                className={buttonClass}
+              >
+                Sign in to Instagram
+              </button>
+              <p className="max-w-[58ch] text-[13px] text-muted">
+                Opens Instagram&rsquo;s own page in the browser this app already uses. You type
+                into Instagram, not into Curated - your password is never sent here, read here
+                or kept here.
+              </p>
+            </>
+          )}
+
+          <details className="text-[13px] text-muted">
+            <summary className="cursor-pointer select-none underline-offset-4 hover:underline">
+              Paste a cookie instead
+            </summary>
+            <p className="mt-2">Sign in at instagram.com on your own machine, then:</p>
             <ol className="mt-2 list-inside list-decimal space-y-1">
               <li>Open developer tools and go to Application (or Storage)</li>
               <li>Under Cookies, pick https://www.instagram.com</li>
@@ -123,7 +220,7 @@ export default function SessionPanel({ onChange }: { onChange: () => void }) {
             <p className="mt-2">
               Keep that browser signed in - logging out there ends this session too.
             </p>
-          </div>
+          </details>
           <Field label="sessionid">
             <input
               value={sessionId}

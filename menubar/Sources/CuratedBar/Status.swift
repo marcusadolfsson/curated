@@ -2,11 +2,18 @@ import Foundation
 
 // MARK: - Wire types
 //
-// These mirror what the running app already returns. Nothing here asks the
-// server for anything new: /api/watch, /api/sync, /api/session and /api/posts
-// all exist and are all GET-only reads. Every POST on those routes *does*
-// something (starts a sync, starts the watcher, pauses), so this app never
-// sends one. See README.md, "What it deliberately does not do".
+// These mirror what the running app already returns. /api/watch, /api/sync,
+// /api/session, /api/session/signin and /api/posts all exist and are GET-only
+// reads here.
+//
+// This app used to send no POST at all, because every POST on those routes
+// *does* something - starts a sync, starts the watcher, pauses - and a menu is
+// too easy to hit for that. There is now exactly one exception, opening the
+// sign-in window, and it earns the exception by being the thing you need when
+// the app has stopped working: a signed-out Curated cannot fetch anything, and
+// the menu bar is where you find out. It still changes state, so it is the
+// only item here that asks first. See README.md, "What it deliberately does
+// not do".
 
 struct WatchPayload: Decodable {
     var enabled: Bool
@@ -96,6 +103,18 @@ struct AgentStatus {
 
 // MARK: - Snapshot
 
+/// The sign-in window's state, while one is standing open.
+struct SignInPayload: Decodable {
+    var phase: String
+    var message: String
+    var username: String?
+    var startedAt: Date?
+    var paused: Bool
+
+    /// A window is up and the app is waiting on a person.
+    var working: Bool { ["opening", "waiting", "verifying"].contains(phase) }
+}
+
 struct Snapshot {
     var takenAt = Date()
 
@@ -105,6 +124,7 @@ struct Snapshot {
     var watch: WatchPayload?
     var sync: SyncPayload?
     var session: SessionPayload?
+    var signIn: SignInPayload?
     var counts: CountsPayload?
 
     var traffic: ClientTraffic?
