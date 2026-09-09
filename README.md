@@ -145,31 +145,58 @@ rate limits and, eventually, a locked account.
 
 ## Requirements
 
-Whichever way you run it:
+Two, and neither is software:
 
-- A **Claude credential**, if you want posts described and categorised. Leave
-  it out and that half of the app switches off cleanly; see feature 3. The SDK resolves it the way
-  the CLI does - `CLAUDE_CODE_OAUTH_TOKEN` from the environment, an
-  `ANTHROPIC_API_KEY`, or a login at `~/.claude/.credentials.json`. Both
-  deployed paths use the first: a long-lived token from `claude setup-token`,
-  read from a file the Mac keeps at `~/.curated/claude-token` and passed to the
-  container through `.env`. An interactive login is fine for `npm run dev`, but
-  on macOS it lives in the keychain, which a launchd job cannot read and a
-  rebooted machine cannot reach at all until someone signs in at the console.
-- A **residential connection**, or the proxy setting pointed at one. Instagram
+- **An Instagram account you are willing to automate.** This drives a real
+  browser against a real account, and an account driven too hard gets locked.
+  Most of the design below - the pacing, the six-hour stop, the refusal to
+  retry - exists because of that rather than because of taste.
+- **A residential connection**, or the proxy setting pointed at one. Instagram
   treats datacentre addresses as suspect, for the reasons above.
 
-Running natively also wants **Node 22** - not whatever is current, because
-`better-sqlite3` has no prebuilt binary for Node 26 and will not compile against
-its headers, which leaves the app unable to open its own database - and Chromium
-for Playwright. The container brings both with it.
+A **Claude credential** is optional. Without one the app is still a reader - it
+collects, files, saves, reacts and replies; what stops is describing and
+categorising, and the interface removes those rather than showing empty ones.
+The SDK resolves it the way the CLI does: `CLAUDE_CODE_OAUTH_TOKEN`, an
+`ANTHROPIC_API_KEY`, or a login at `~/.claude/.credentials.json`. Paste one
+from `claude setup-token` into the menu bar and it is written to
+`~/.curated/claude-token` and used immediately. Not the keychain: a launchd job
+cannot read it reliably, and a rebooted machine cannot reach it at all until
+somebody signs in at the console.
+
+**Node 22** matters only if you are running from a checkout - `better-sqlite3`
+has no prebuilt binary for Node 26 and will not compile against its headers, so
+a newer runtime leaves the app unable to open its own database. The app bundle
+carries its own, from nodejs.org rather than Homebrew, whose `node` is a 67 KB
+shim against seventeen of its own dylibs and cannot be copied anywhere.
 
 ## Installing
 
-Two paths. The Mac one is how this actually runs. Docker is for trying it on
-Linux, and is the rollback; nothing routine uses it.
+It is one app.
 
-### On a Mac
+```bash
+cd menubar && make install-standalone && make login-item
+```
+
+That builds **Curated.app** - about 390 MB - and puts it in `~/Applications`,
+starting at login. It carries its own Node and its own built server and runs
+them as a child process, so there is no Homebrew, no checkout to keep, no plist
+to edit and no `sudo`. Everything after that is in the menu bar: sign in to
+Instagram, paste a Claude token, keep the Mac awake.
+
+Chromium is the one thing it does not carry. It is 356 MB, it is somebody
+else's signed code, and putting it inside a signed bundle means signing every
+helper in its framework - so it is downloaded once, on request, into
+Playwright's usual cache.
+
+There was a container and a set of systemd units for the Linux box this used to
+live on; both are gone. Two deployment paths meant reasoning about every change
+twice, and the one nothing ran was reliably the one that had quietly broken.
+Git history has them if a Linux host is ever wanted.
+
+### Working on it
+
+The app bundle is for running it, not for changing it. For that:
 
 ```bash
 npm ci
@@ -177,65 +204,23 @@ npx playwright install chromium
 npm run dev            # http://localhost:3000
 ```
 
-That is enough to look at it. To have it keep running, `deploy/mac/` holds the
-login agent and `deploy/mac/README.md` is the procedure:
+`deploy/mac/` still holds a login agent that runs the server straight from a
+checkout, which is the way to have a working copy running all day. The two are
+mutually exclusive on purpose - the app refuses to start a second server while
+anything answers on the port, because two instances against one Instagram
+session is what gets an account flagged.
 
-```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.curated.plist
-launchctl bootout    gui/$(id -u)/com.curated.app        # to stop it
-```
-
-### With Docker
-
-```bash
-cp .env.example .env              # then put a token in it, see below
-docker compose up -d --build      # http://127.0.0.1:3010
-docker compose logs -f
-```
-
-The image is Playwright's own, so Node and Chromium arrive with it and the Node
-22 rule does not apply. Settings come from `.env`, which Compose reads by
-itself:
-
-| Variable | Default | What it is |
-| --- | --- | --- |
-| `CLAUDE_CODE_OAUTH_TOKEN` | none | the analysis agent's credentials |
-| `CURATED_DATA` | `./data` | database, media, session, logs |
-| `INSTA_PORT` | `3010` | published on loopback only, never on `0.0.0.0` |
-| `TZ` | `America/New_York` | the report buckets send times in local time |
-| `ANALYSIS_CONCURRENCY` | `3` | posts described at once, one agent each |
-
-**The token is the whole credential story here**, the same long-lived token from
-`claude setup-token` that the Mac keeps at `~/.curated/claude-token`. If you
-have that file already, reuse it rather than minting a second:
-
-```bash
-CLAUDE_CODE_OAUTH_TOKEN=$(cat ~/.curated/claude-token) docker compose up -d
-```
-
-The container used to bind-mount `~/.claude` instead. That only worked when the
-host uid happened to be 1001, since the credentials file inside is mode 600, and
-it handed the container every other credential and project record in that
-directory to read one token. A token in the environment does neither.
-`ANTHROPIC_API_KEY` also works and is billed per request rather than to a plan.
-
-`docker-compose.dev.yml` is the same image with the source bind-mounted and
-`next dev`, on port 3011.
-
-Neither CuratedBar nor Tunnelbar belongs to this path. The first is a macOS menu
-bar app; the second is how the Mac runs its connector. Expose the container
-however that host already exposes things: a reverse proxy in front of
-`127.0.0.1:3010`, or a Cloudflare tunnel pointed at it.
+`menubar/` builds without the server too (`make install`), which is the fast
+loop when the menu bar app itself is what you are changing.
 
 ### How it actually runs
 
-On a Mac mini at home. Three pieces, and only the first of them is Curated:
+On a Mac mini at home. Two pieces, and only the first is Curated:
 
 | Piece | What it is |
 | --- | --- |
-| The app | a login agent, `com.curated.app`. `deploy/mac/` holds it, and `deploy/mac/README.md` is the procedure |
-| [CuratedBar](menubar/) | a small menu bar app, in this repo, showing whether the server is up, when it last synced, and whether anyone can reach it |
-| The tunnel | not Curated's to run any more. [Tunnelbar](https://github.com/marcusadolfsson/tunnelbar) starts the connector and keeps it up |
+| **Curated.app** | the menu bar app and the server it supervises, `com.curated.app` at login |
+| The tunnel | not Curated's to run. [Tunnelbar](https://github.com/marcusadolfsson/tunnelbar) starts the connector and keeps it up |
 
 The tunnel used to be a second login agent here, `com.curated.tunnel`. It is
 gone: one app that understands connectors beats a plist per project, and
@@ -251,12 +236,18 @@ disguise, because the browser is now a genuine macOS Chromium whose user agent
 and client hints agree with the machine underneath, rather than a Linux build
 claiming to be Windows.
 
-A **login agent, not a daemon**, deliberately: it has to run inside the
-logged-in session, because it drives a real browser and because the analysis
-agent borrows the account's own Claude credentials. A daemon has neither.
+It runs in the **logged-in session, not as a daemon**, deliberately: it drives a
+real browser, and the analysis agent borrows the account's own Claude
+credentials. A daemon has neither.
 
-On the Mac, one secret sits outside the repo at mode 600, so it is never
-committed and can be rotated on its own:
+The supervisor keeps the two rules the launch agent had. Thirty seconds before
+a restart, so a server failing at boot does not open a browser at Instagram in
+a loop. And it will not start while anything already answers on the port - with
+one exception it can prove, its own orphan, identified by a pid file, because
+killing the app does not kill the process it started.
+
+One secret sits outside the repo at mode 600, so it is never committed and can
+be rotated on its own:
 
 ```
 ~/.curated/claude-token    the analysis agent's OAuth token
@@ -330,22 +321,25 @@ Start with the menu bar icon: monochrome means healthy, and the panel says what
 is wrong when it is not. The same answer without a screen:
 
 ```bash
-~/Applications/CuratedBar.app/Contents/MacOS/CuratedBar --report
+~/Applications/Curated.app/Contents/MacOS/Curated --report
 ```
 
 Then, for detail:
 
 ```bash
-tail -f ~/insta/data/curated.log            # the app
-curl -s localhost:3000/api/session          # signed in?
-curl -s localhost:3000/api/watch            # is it listening, and on how many sockets
+tail -f ~/Library/Application\ Support/Curated/curated.log   # the app, and the server it runs
+curl -s localhost:3000/api/session                  # signed in?
+curl -s localhost:3000/api/watch                    # is it listening, and on how many sockets
 curl -s -X POST localhost:3000/api/session/egress   # the address Instagram sees
-launchctl print gui/$(id -u)/com.curated.app | head -20
 ```
 
+To restart it, quit the app and open it again - the server is its child and
+stops with it. `launchctl kickstart` will not do it: the login agent runs
+`open -a`, which activates an app that is already running rather than starting
+the new one.
+
 The connector's log is Tunnelbar's now, under
-`~/Library/Application Support/Tunnelbar/logs/`. `data/tunnel.log` stops at the
-moment the old login agent was retired and is kept only as history.
+`~/Library/Application Support/Tunnelbar/logs/`.
 
 Read the session answer literally. **Signed out** means Instagram sent the tab
 to a login page or a challenge, and nothing retries until a cookie is pasted.
@@ -373,43 +367,45 @@ survives the origin moving. Migrating from the cloud box was a matter of
 standing up a second tunnel and repointing one CNAME - the login page never
 changed.
 
-The container is still buildable, and `docker-compose.yml` says so at the top:
-Linux is a testing target and the rollback, not how this is deployed.
-
 It is a **separate tunnel** rather than a second connector on the existing one,
 because two connectors on one tunnel are a load-balanced pair: Cloudflare would
 send requests to whichever, and half of them would land on a machine with a
-different database. The old tunnel's ingress rule for this hostname was left in
-place deliberately - it is the rollback. Point the CNAME back and start the
-container.
+different database.
 
 ## What lives where
 
-Everything the app writes is under `DATA_DIR` (`./data` by default):
+Everything the app writes is under `DATA_DIR`, which is
+`~/Library/Application Support/Curated` unless something says otherwise:
 
 ```
-data/insta.db                 posts, threads, settings, sync history
-data/media/                   thumbnails, cached reels and gallery photos
-data/session/instagram.json   the Instagram session (mode 600)
-data/curated.log              the app
-data/tunnel.log               the connector, up to the day it moved to Tunnelbar
+insta.db                 posts, threads, settings, sync history
+media/                   thumbnails, cached reels and gallery photos
+session/instagram.json   the Instagram session (mode 600)
+browser/                 Chromium's own profile: history, cache, device state (mode 700)
+curated.log              the app, and anything it starts
+server.pid               which server this app started, so an orphan can be told apart
 ```
 
-Outside the repo, and deliberately so:
+It used to be `./data` inside the checkout. That put a live session and a
+database inside the thing that gets built and copied - the build tracer walked
+into it and pulled 83 MB of it into a bundle - and it meant deleting the repo
+took the data with it. Now the app is disposable and the data is not.
+
+Outside it, deliberately:
 
 ```
-~/.curated/claude-token                            the analysis agent's OAuth token (mode 600)
-~/Library/LaunchAgents/com.curated.plist           the app at login
-~/Library/LaunchAgents/com.curated.menubar.plist   CuratedBar at login
+~/.curated/claude-token                        the analysis agent's OAuth token (mode 600)
+~/Library/LaunchAgents/com.curated.app.plist   Curated at login
+~/Library/Caches/ms-playwright/                Chromium, shared and re-downloadable
 ```
 
 The connector's state belongs to Tunnelbar and lives under
 `~/Library/Application Support/Tunnelbar/`.
 
-Treat `data/session` as a password: anyone holding it is signed in as you. The
-media is worth keeping too - those CDN links expired hours after they were
-fetched, so the only other way to get a thousand thumbnails back is a thousand
-requests to Instagram.
+Treat `session/` and `browser/` as passwords: anyone holding either is signed in
+as you. The media is worth keeping too - those CDN links expired hours after
+they were fetched, so the only other way to get a thousand thumbnails back is a
+thousand requests to Instagram.
 
 ## Known limits
 
