@@ -26,6 +26,23 @@ private func renderPanel(to path: String, poller: Poller) -> String {
 enum CommandLineReport {
     static func runIfRequested() {
         let arguments = CommandLine.arguments
+
+        // Registering from a shell, for anyone who would rather not click a
+        // menu - and the way the login item gets tested without a person at
+        // the keyboard to answer a dialog.
+        if arguments.contains("--start-at-login") || arguments.contains("--no-start-at-login") {
+            MainActor.assumeIsolated {
+                let wanted = arguments.contains("--start-at-login")
+                if LoginItem.shared.enabled != wanted { LoginItem.shared.toggle() }
+                LoginItem.shared.rememberAsked()
+                if let error = LoginItem.shared.lastError {
+                    FileHandle.standardError.write(Data("\(error)\n".utf8))
+                }
+                print(LoginItem.shared.description)
+                exit(LoginItem.shared.lastError == nil ? 0 : 1)
+            }
+        }
+
         let snapshotIndex = arguments.firstIndex(of: "--snapshot")
         guard arguments.contains("--report") || arguments.contains("--json") || snapshotIndex != nil else { return }
         let wantsJSON = arguments.contains("--json")

@@ -248,6 +248,7 @@ final class Poller {
         lines.append("Client:   last connect \(snapshot.lastClientConnect == nil && snapshot.clientConnectIsSinceLaunch ? "none seen yet" : Format.relative(snapshot.lastClientConnect))")
 
         lines.append("Server:   \(Server.shared.isHost ? "hosted by this app (\(Server.shared.summary))" : "run from somewhere else")")
+        lines.append("Login:    \(LoginItem.shared.description)")
         return lines.joined(separator: "\n")
     }
 }
