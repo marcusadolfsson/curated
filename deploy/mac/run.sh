@@ -25,18 +25,32 @@ if [ -r "$TOKEN_FILE" ]; then
 fi
 
 export NODE_ENV=production
-export DATA_DIR="$PWD/data"
+# Out of the checkout, where a macOS app keeps its data.
+#
+# It used to be ./data, which put a live session, a database and Chromium's
+# profile inside the thing that gets built and copied. The build tracer walked
+# into it and pulled 83 MB of it into the output - so a bundle would have
+# carried the Instagram session wherever it was installed. It also means the
+# repo can be deleted and rebuilt without taking the data with it.
+export DATA_DIR="${DATA_DIR:-$HOME/Library/Application Support/Curated}"
+SERVER="$PWD/dist/server"
+export MIGRATIONS_DIR="$SERVER/drizzle"
 export PORT="${PORT:-3000}"
 # Each post is described by its own agent process; three at once is what the
 # cloud box ran and a Mac mini handles it comfortably.
 export ANALYSIS_CONCURRENCY="${ANALYSIS_CONCURRENCY:-3}"
 
-# Next directly, not through npx.
+# The assembled server, run directly.
 #
-# launchd signals the process it started, and `npx next start` made that npm,
-# with the server as its child. npm does not pass SIGTERM on before it goes, so
-# a stop never reached the handler that saves the live cookies and closes the
-# browser - the app was killed outright and went back to whatever was last
-# written when the inbox loaded. Running the server as the process launchd
-# supervises puts the signal where the handler is.
-exec node node_modules/next/dist/bin/next start -p "$PORT" -H 127.0.0.1
+# Two reasons it is not `npx next start`. launchd signals the process it
+# started, and npx made that npm, with the server as its child; npm goes
+# without passing SIGTERM on, so the handler that closes the browser never
+# heard it. And this is the same artifact the app bundle carries - one thing
+# that gets built and run, rather than a checkout here and a bundle there.
+[ -d "$SERVER" ] || {
+  echo "No $SERVER. Run 'npm run build' then 'scripts/bundle.sh'." >&2
+  exit 1
+}
+cd "$SERVER"
+export HOSTNAME=127.0.0.1
+exec node server.js

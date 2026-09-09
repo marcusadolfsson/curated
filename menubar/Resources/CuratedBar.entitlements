@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  What the Hardened Runtime has to be asked to allow.
+
+  Both of these exist because this app carries a JavaScript engine and runs
+  native modules through it. Neither weakens anything the app itself relies on
+  for safety - the Instagram session is protected by file permissions and by
+  living outside the bundle, not by these.
+
+  There is no sandbox entitlement and there cannot be one: the app spawns
+  Chromium, reads a token from ~/.curated, and writes a database in Application
+  Support. A sandboxed build would need every one of those as a separate
+  exception and would still not get the browser.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- V8 compiles JavaScript to machine code at runtime and needs pages that
+       are writable and then executable. Without this, node exits immediately. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- better-sqlite3 and sharp are loaded with dlopen at runtime. Library
+       validation would refuse any of them not signed by this same identity,
+       and the prebuilt binaries are signed by whoever built them. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

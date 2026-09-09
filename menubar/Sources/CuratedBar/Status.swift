@@ -115,6 +115,16 @@ struct SignInPayload: Decodable {
     var working: Bool { ["opening", "waiting", "verifying"].contains(phase) }
 }
 
+/// Whether the analysis half of the app has a credential. Never the token.
+struct ClaudeTokenPayload: Decodable {
+    var ok: Bool
+    var source: String
+    var detail: String
+    var stored: Bool?
+    var saved: Bool?
+    var message: String?
+}
+
 struct Snapshot {
     var takenAt = Date()
 
@@ -125,6 +135,7 @@ struct Snapshot {
     var sync: SyncPayload?
     var session: SessionPayload?
     var signIn: SignInPayload?
+    var claude: ClaudeTokenPayload?
     var counts: CountsPayload?
 
     var traffic: ClientTraffic?

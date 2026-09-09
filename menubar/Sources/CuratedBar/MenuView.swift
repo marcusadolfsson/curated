@@ -45,6 +45,9 @@ struct MenuView: View {
     @Bindable var poller: Poller
     @Environment(\.openURL) private var openURL
     @State private var confirmSignIn = false
+    @State private var confirmSignOut = false
+    @State private var askForToken = false
+    @State private var token = ""
 
     private var snapshot: Snapshot { poller.snapshot }
 
@@ -68,6 +71,33 @@ struct MenuView: View {
                 "Curated stops reading Instagram while the window is open - it and the "
                     + "window share one browser. You type into Instagram's own page; your "
                     + "password never reaches Curated."
+            )
+        }
+        .alert("Sign out of Instagram?", isPresented: $confirmSignOut) {
+            Button("Sign out", role: .destructive) { poller.signOut() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "The saved session is deleted and Curated stops reading anything until "
+                    + "you sign in again. Signing back in is a fresh login, which is the "
+                    + "one thing worth doing rarely."
+            )
+        }
+        .alert("Claude token", isPresented: $askForToken) {
+            // A plain field, not SecureField: this is pasted rather than typed
+            // from memory, and a row of dots makes a mispaste impossible to see.
+            TextField("sk-ant-...", text: $token)
+            Button("Save") { poller.setClaudeToken(token); token = "" }
+            if snapshot.claude?.stored == true {
+                Button("Remove", role: .destructive) { poller.clearClaudeToken(); token = "" }
+            }
+            Button("Cancel", role: .cancel) { token = "" }
+        } message: {
+            Text(
+                "Make one with `claude setup-token`. It is written to "
+                    + "~/.curated/claude-token and used straight away - no restart. "
+                    + "Without it Curated still reads and files posts; it just stops "
+                    + "describing and categorising them."
             )
         }
     }
@@ -203,16 +233,57 @@ struct MenuView: View {
                 poller.refreshNow()
             }
 
-            // The only item here that changes anything, so it is the only one
-            // that asks. While a window is open it says so instead, because
-            // opening a second one is not a thing that can happen.
+            // A toggle rather than a one-way instruction to run pmset with
+            // sudo. It holds only while it says it does, and only while this
+            // app is running.
+            MenuToggle(
+                "Prevent sleep",
+                isOn: SleepGuard.shared.enabled,
+                failed: SleepGuard.shared.enabled && !SleepGuard.shared.holding
+            ) {
+                SleepGuard.shared.enabled.toggle()
+            }
+
+            Divider().padding(.vertical, 4)
+
+            // The writes. Each one asks first: a menu is easy to hit by
+            // accident, and every item below costs something to undo.
             if let signIn = snapshot.signIn, signIn.working {
                 MenuButton("Signing in - see the window", shortcut: nil) {
                     openURL(poller.config.localBase.appending(path: "setup"))
                 }
+            } else if snapshot.session?.connected == true {
+                MenuButton("Sign out of Instagram...", shortcut: nil) {
+                    confirmSignOut = true
+                }
             } else {
                 MenuButton("Sign in to Instagram...", shortcut: nil) {
                     confirmSignIn = true
+                }
+            }
+
+            MenuButton(
+                snapshot.claude?.ok == true ? "Replace Claude token..." : "Add a Claude token...",
+                shortcut: nil
+            ) {
+                token = ""
+                askForToken = true
+            }
+
+            // Only in a bundle that carries its own server and has not got a
+            // browser yet. 356 MB is not something to start without asking.
+            if Server.shared.isHost {
+                switch Browser.shared.state {
+                case .fetching:
+                    MenuButton("Downloading Chromium...", shortcut: nil) {}
+                case .present:
+                    EmptyView()
+                case .failed(let why):
+                    MenuButton("Chromium: \(why)", shortcut: nil) { Browser.shared.fetch() }
+                case .unknown:
+                    MenuButton("Download Chromium (356 MB)...", shortcut: nil) {
+                        Browser.shared.fetch()
+                    }
                 }
             }
 
@@ -285,6 +356,49 @@ private struct Row: View {
 
 /// A plain button styled like a menu item, since MenuBarExtra in window mode
 /// draws ordinary SwiftUI rather than real menu items.
+/// A menu row that is on or off, with the checkmark on the left where macOS
+/// puts it. `failed` is for the case where the answer is meant to be yes and
+/// the system said no - silently showing a tick would be a lie.
+private struct MenuToggle: View {
+    var title: String
+    var isOn: Bool
+    var failed: Bool
+    var action: () -> Void
+
+    @State private var hovering = false
+
+    init(_ title: String, isOn: Bool, failed: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.isOn = isOn
+        self.failed = failed
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: failed ? "exclamationmark.triangle.fill" : "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(failed ? Color.orange : Color.primary)
+                    .opacity(isOn ? 1 : 0)
+                    .frame(width: 12, alignment: .leading)
+                Text(title).font(.system(size: 12))
+                Spacer()
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(hovering ? Color.accentColor.opacity(0.18) : .clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(failed ? "macOS refused the request to stay awake." : "")
+    }
+}
+
 private struct MenuButton: View {
     var title: String
     var shortcut: Character?

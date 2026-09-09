@@ -70,9 +70,26 @@ final class Poller {
     /// Open the sign-in window, then look again so the menu shows it standing
     /// open rather than waiting out the next tick.
     func beginSignIn() {
+        act { try await $0.beginSignIn() }
+    }
+
+    func signOut() {
+        act { try await $0.signOut() }
+    }
+
+    func setClaudeToken(_ token: String) {
+        act { try await $0.setClaudeToken(token) }
+    }
+
+    func clearClaudeToken() {
+        act { try await $0.clearClaudeToken() }
+    }
+
+    /// Do the thing, then look again, so the menu reflects it immediately
+    /// rather than at whatever point the next tick lands.
+    private func act(_ body: @escaping (CuratedAPI) async throws -> Void) {
         Task {
-            let api = CuratedAPI(base: config.localBase)
-            _ = try? await api.beginSignIn()
+            try? await body(CuratedAPI(base: config.localBase))
             await refresh()
         }
     }
@@ -103,6 +120,7 @@ final class Poller {
             next.sync = try? await api.sync()
             next.session = try? await api.session()
             next.signIn = try? await api.signIn()
+            next.claude = try? await api.claudeToken()
 
             if Date().timeIntervalSince(lastCountsCheck) >= countsInterval {
                 if let counts = try? await api.counts() {
@@ -232,7 +250,14 @@ final class Poller {
         lines.append("Client:   last connect \(snapshot.lastClientConnect == nil && snapshot.clientConnectIsSinceLaunch ? "none seen yet" : Format.relative(snapshot.lastClientConnect))")
 
         for agent in snapshot.agents {
-            lines.append("Agent:    \(agent.label) \(agent.running ? "running" : (agent.loaded ? "loaded, not running" : "not loaded"))")
+            // When this app carries the server, the launch agent is meant to
+            // be absent and saying "not loaded" reads as a fault. Report who
+            // is actually running it.
+            if Server.shared.isHost {
+                lines.append("Server:   hosted by this app (\(Server.shared.summary))")
+            } else {
+                lines.append("Agent:    \(agent.label) \(agent.running ? "running" : (agent.loaded ? "loaded, not running" : "not loaded"))")
+            }
         }
         return lines.joined(separator: "\n")
     }
