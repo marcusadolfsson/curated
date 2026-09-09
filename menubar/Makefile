@@ -1,9 +1,9 @@
-APP      := CuratedBar
+APP      := Curated
 BUNDLE   := $(APP).app
 CONFIG   := release
 BIN      := .build/$(CONFIG)/$(APP)
 INSTALL  := $(HOME)/Applications
-AGENT    := com.curated.menubar
+AGENT    := com.curated.app
 PLIST    := $(HOME)/Library/LaunchAgents/$(AGENT).plist
 
 ## Signing identity. This matters more than it looks for something that starts
@@ -77,10 +77,10 @@ sign:
 	  find $(BUNDLE)/Contents/Resources -type f \( -name '*.node' -o -name '*.dylib' \) \
 	    -exec codesign --force --options runtime --sign '$(SIGN_ID)' {} + 2>/dev/null; \
 	  if [ -f $(BUNDLE)/Contents/Resources/node/bin/node ]; then \
-	    codesign --force --options runtime --entitlements Resources/CuratedBar.entitlements \
+	    codesign --force --options runtime --entitlements Resources/Curated.entitlements \
 	      --sign '$(SIGN_ID)' $(BUNDLE)/Contents/Resources/node/bin/node; \
 	  fi; \
-	  codesign --force --options runtime --entitlements Resources/CuratedBar.entitlements \
+	  codesign --force --options runtime --entitlements Resources/Curated.entitlements \
 	    --sign '$(SIGN_ID)' $(BUNDLE); \
 	else \
 	  echo "No signing identity found. Signing ad-hoc, which means the app's"; \
@@ -110,8 +110,10 @@ copy:
 	@echo "Already running? It will not be replaced until you quit it:"
 	@echo "  pkill -f '$(APP).app/Contents/MacOS/$(APP)'"
 
-## Optional: start it at login, the same way the app and tunnel already do.
-login-item: install
+## Optional: start it at login. Whatever is installed - run `install` or
+## `install-standalone` first. It used to depend on `install`, which meant
+## asking for a login item quietly rebuilt the small app over the full one.
+login-item:
 	@mkdir -p $(HOME)/Library/LaunchAgents
 	@printf '%s\n' \
 	  '<?xml version="1.0" encoding="UTF-8"?>' \

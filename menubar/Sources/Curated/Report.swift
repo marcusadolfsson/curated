@@ -20,7 +20,7 @@ private func renderPanel(to path: String, poller: Poller) -> String {
     }
 }
 
-/// `CuratedBar --report` polls once, prints the same summary the Copy status
+/// `Curated --report` polls once, prints the same summary the Copy status
 /// item puts on the clipboard, and exits. Useful from a shell, from a script,
 /// or over SSH where there is no menu bar to look at.
 enum CommandLineReport {
@@ -104,9 +104,6 @@ extension Poller {
         case .notChecked: root["public"] = ["reachable": false, "error": "not checked"]
         }
         root["lastClientConnect"] = snapshot.lastClientConnect.map { ISO8601DateFormatter().string(from: $0) } as Any
-        root["agents"] = snapshot.agents.map {
-            ["label": $0.label, "loaded": $0.loaded, "running": $0.running, "pid": $0.pid as Any]
-        }
 
         guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else {
             return "{}"

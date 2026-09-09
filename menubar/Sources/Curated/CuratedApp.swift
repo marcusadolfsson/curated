@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct CuratedBarApp: App {
+struct CuratedApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
