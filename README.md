@@ -259,12 +259,24 @@ connector's credentials went with the connector, to Tunnelbar.
 
 ## Setting it up
 
-**Sign in.** Setup page, paste a session cookie: sign in at instagram.com in
-your own browser, copy the `sessionid` cookie, paste it in. That is the only
-way, on purpose. The password login was removed - Instagram throttles
-`/accounts/login/` by IP, and every scraper posts the same plaintext
+**Sign in.** From the menu bar: *Sign in to Instagram* opens Instagram's own
+login page in the browser this app already uses, on the profile it has been
+using all along, and keeps whatever cookies Instagram sets. It is not on the
+settings page, because the window opens on the Mac either way - it drives that
+machine's browser, so it was never something a phone could do. You type
+into Instagram, never into Curated - the password is not read, stored or
+replayed here. A checkpoint or a second factor is just a page in front of you.
+The app stops reading Instagram while the window is open, because the window and
+the app share one browser.
+
+Nothing posts a password programmatically, and nothing should: Instagram
+throttles `/accounts/login/` by IP, and every scraper puts the same plaintext
 `#PWD_INSTAGRAM_BROWSER:0:` shape at it, which the real page stopped doing years
 ago.
+
+Pasting a `sessionid` cookie from another browser still works, folded away under
+the button. It is the fallback, and the way a session moves from another
+machine.
 
 **Choose the conversations.** *Refresh conversations* reads your inbox and lists
 who you talk to without importing anything. Tick the ones to follow. With
@@ -284,7 +296,7 @@ watching, but not what you want long-term.
 | React automatically | Off by default. Reacts once a post has been described. |
 | Newest posts eligible | How far back reactions may reach. See below. |
 | Seconds between reactions | Spacing. Ten is gentle; a burst is not. |
-| Proxy | Where Instagram traffic leaves from. Empty now that it runs at home. |
+| Proxy | Where Instagram traffic leaves from. Empty now that it runs at home, so it is no longer on the settings page - `PUT /api/settings` still sets `proxyServer` for a host that needs one. |
 
 ## Safety rails
 

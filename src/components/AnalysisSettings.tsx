@@ -17,9 +17,6 @@ type Settings = {
   historyDays: string;
   headless: string;
   autoAnalyze: string;
-  proxyServer: string;
-  proxyUsername: string;
-  proxyPassword: string;
   realtime: string;
   autoReact: string;
   reactionEmoji: string;
@@ -35,27 +32,6 @@ export default function AnalysisSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [egress, setEgress] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  const checkEgress = async () => {
-    setChecking(true);
-    setEgress(null);
-    try {
-      const response = await fetch("/api/session/egress", { method: "POST" });
-      const body = (await response.json()) as { ip?: string; via?: string; error?: string };
-      setEgress(
-        body.error
-          ? `Could not check: ${body.error}`
-          : `Instagram sees ${body.ip}${body.via ? `, via ${body.via}` : ", straight from this server"}.`,
-      );
-    } catch (error) {
-      setEgress(error instanceof Error ? error.message : String(error));
-    } finally {
-      setChecking(false);
-    }
-  };
-
   useEffect(() => {
     void fetch("/api/settings")
       .then((r) => r.json())
@@ -211,63 +187,6 @@ export default function AnalysisSettings() {
           />
           <span className="text-[14px]">Describe new posts as soon as they arrive</span>
         </label>
-
-        <div className="border-t border-line pt-5">
-          <h3 className="font-serif text-xl">Where the traffic comes from</h3>
-          <p className="mt-1 max-w-[58ch] text-[14px] text-muted">
-            Instagram treats this server&apos;s address as suspect. Sending its traffic through a
-            proxy at home makes it come from the same place you signed in from.
-          </p>
-
-          <div className="mt-4 space-y-3">
-            <label className="block">
-              <span className="text-[13px] text-muted">Proxy (blank = straight from this server)</span>
-              <input
-                value={settings.proxyServer}
-                onChange={(event) => update({ proxyServer: event.target.value })}
-                placeholder="socks5://192.168.1.10:1080"
-                className="w-full border-b border-line bg-transparent py-1.5 text-[15px] placeholder:text-muted focus:border-accent focus:outline-none"
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-4">
-              <label className="block">
-                <span className="text-[13px] text-muted">Username</span>
-                <input
-                  value={settings.proxyUsername}
-                  onChange={(event) => update({ proxyUsername: event.target.value })}
-                  className="w-full border-b border-line bg-transparent py-1.5 text-[15px] focus:border-accent focus:outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[13px] text-muted">Password</span>
-                <input
-                  type="password"
-                  value={settings.proxyPassword}
-                  onChange={(event) => update({ proxyPassword: event.target.value })}
-                  className="w-full border-b border-line bg-transparent py-1.5 text-[15px] focus:border-accent focus:outline-none"
-                />
-              </label>
-            </div>
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={checkEgress}
-                disabled={checking}
-                className="text-[13px] text-accent underline-offset-4 hover:underline disabled:opacity-50"
-              >
-                {checking ? "Checking" : "Save first, then check the address"}
-              </button>
-            </div>
-            {egress && <p className="text-[13px] text-muted">{egress}</p>}
-            {settings.proxyServer.startsWith("socks") && settings.proxyUsername && (
-              <p className="border-l-2 border-danger pl-3 text-[13px] text-danger">
-                Chromium cannot authenticate to a SOCKS proxy - it ignores the username and
-                password, and sign-in will fail. Use an http:// proxy for an authenticated one, or
-                drop the credentials and let the tailnet be the boundary.
-              </p>
-            )}
-          </div>
-        </div>
 
         <div className="border-t border-line pt-5">
           <h3 className="font-serif text-xl">Reacting</h3>
