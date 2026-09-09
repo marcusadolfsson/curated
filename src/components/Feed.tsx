@@ -5,6 +5,8 @@ import Link from "next/link";
 import PostRow from "./PostRow";
 import PostPreview from "./PostPreview";
 import CategoryMenu from "./CategoryMenu";
+import HeaderMenu from "./HeaderMenu";
+import { ChatIcon } from "./icons";
 import type { PostView } from "@/lib/serialize";
 import type { SyncState } from "@/lib/sync";
 import { PHONE, useMediaQuery } from "@/lib/useMediaQuery";
@@ -292,10 +294,13 @@ export default function Feed() {
       {/* Nothing but the dark until the post is up. The list is behind it
           either way; showing it first only advertises the wait. */}
       {launching && !preview && <div className="fixed inset-0 z-50 bg-black md:hidden" />}
-      <header className="flex flex-wrap items-end justify-between gap-4 pt-8 pb-5 sm:pt-10 sm:pb-6">
-        <div>
-          <h1 className="font-serif text-[34px] leading-none tracking-tight sm:text-[40px]">Curated</h1>
-          <p className="mt-2 text-[14px] text-muted sm:text-[15px]">
+      {/* One row: the name, and two round buttons. What used to be three words
+          of links is a chat bubble and a cog, which is what a phone expects
+          and what leaves the name room to be the name. */}
+      <header className="flex items-start justify-between gap-4 pt-5 pb-4 sm:pt-8 sm:pb-5">
+        <div className="min-w-0">
+          <h1 className="font-serif text-[32px] leading-none tracking-tight sm:text-[40px]">Curated</h1>
+          <p className="mt-1.5 text-[13.5px] text-muted sm:mt-2 sm:text-[15px]">
             {headline(data, session)}
             {watcher?.listening && (
               <span className="ml-2 inline-flex items-center gap-1.5 text-accent">
@@ -306,20 +311,11 @@ export default function Feed() {
           </p>
         </div>
 
-        <nav className="flex items-center gap-1 text-[14px]" aria-label="Pages">
-          {[
-            ["/chat", "Chat"],
-            ["/report", "Report"],
-            ["/setup", "Setup"],
-          ].map(([href, label]) => (
-            <Link
-              key={href}
-              href={href}
-              className="rounded-full px-3 py-1.5 text-ink-soft transition-colors hover:bg-sunk hover:text-ink"
-            >
-              {label}
-            </Link>
-          ))}
+        <nav className="-mr-2 flex shrink-0 items-center gap-0.5 pt-0.5 sm:-mr-2.5" aria-label="Pages">
+          <Link href="/chat" aria-label="Chat" title="Chat" className={ICON_BUTTON}>
+            <ChatIcon />
+          </Link>
+          <HeaderMenu className={ICON_BUTTON} />
         </nav>
       </header>
 
@@ -432,6 +428,10 @@ export default function Feed() {
     </div>
   );
 }
+
+/** A round, thumb-sized target. Quiet until touched. */
+const ICON_BUTTON =
+  "flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-sunk hover:text-ink active:bg-sunk";
 
 const LABELS: Record<StateFilter, string> = {
   unread: "Unread",
