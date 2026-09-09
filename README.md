@@ -54,9 +54,9 @@ list you can scan in a few seconds — and search.
 **4. Save the ones worth coming back to.** The recipe you meant to cook, the
 paint colour, the place. Kept in one list instead of scrolled past and lost.
 
-**5. The conversation, live.** Reply to a post in the thread, or open the chat
-and talk properly. It reads the thread the moment it stirs, so a real
-back-and-forth works without opening Instagram at all.
+**5. The conversation, live.** Reply to any post straight into the thread it
+came from. There is a chat view too, which reads the thread the moment it
+stirs, so a real back-and-forth works without opening Instagram at all.
 
 Read and unread are the spine of the whole thing, so the pile empties instead
 of growing.
@@ -416,6 +416,12 @@ requests to Instagram.
   that suddenly finds nothing usually means a message shape changed.
 - A session cookie is the only way in. Instagram challenges automated logins
   from a new device or location, and the login endpoint is throttled by IP.
+- **The chat view opens one conversation, and there is no way to switch.** The
+  feed handles as many people as you follow, and replying to a post always goes
+  back to the thread that post came from. The standalone chat is the exception:
+  it takes whichever followed conversation the database returns first. The
+  endpoint behind it already accepts a thread, so what is missing is the picker
+  in front of it.
 
 ## Licence
 
