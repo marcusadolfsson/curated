@@ -127,3 +127,14 @@ body {
     font-size: 17px !important;
   }
 }
+
+/* The state tabs scroll sideways only on a screen too narrow to hold them.
+   No bar: nothing here is meant to look scrollable, and on a desktop it
+   never moves at all. */
+.scroll-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}

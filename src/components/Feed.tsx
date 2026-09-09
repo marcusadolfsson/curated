@@ -408,6 +408,23 @@ export default function Feed() {
   /** Default true, so the filter does not blink out while the first load runs. */
   const describing = data?.analysis ?? true;
 
+  /**
+   * Everyone who sends, not just everyone in the view you are looking at.
+   *
+   * The people come from the current query, so switching to Read - where maybe
+   * only one of them has anything - would drop the control out of the bar and
+   * shift the row under your thumb mid-tap. Once someone has appeared they stay
+   * in the list, with the count from whatever is on screen now.
+   */
+  const everSent = useRef<Map<string, Person>>(new Map());
+  const people = useMemo(() => {
+    for (const person of data?.senders ?? []) everSent.current.set(person.username, person);
+    const here = new Map((data?.senders ?? []).map((person) => [person.username, person]));
+    return [...everSent.current.values()]
+      .map((person) => here.get(person.username) ?? { ...person, count: 0 })
+      .sort((a, b) => b.count - a.count || a.username.localeCompare(b.username));
+  }, [data?.senders]);
+
   const categories = useMemo(() => {
     const entries = Object.entries(data?.categories ?? {});
     return entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -490,43 +507,54 @@ export default function Feed() {
       )}
 
       <div className="sticky top-0 z-10 -mx-4 mb-1 border-b border-line bg-paper/92 px-4 py-2.5 backdrop-blur sm:-mx-6 sm:px-6">
-        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] sm:gap-x-1.5">
-          {(["unread", "all", "read", "saved"] as StateFilter[]).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setStateFilter(value)}
-              aria-pressed={stateFilter === value}
-              className={`rounded-full px-3 py-1.5 transition-colors ${
-                stateFilter === value
-                  ? "bg-sunk text-ink"
-                  : "text-muted hover:bg-sunk/60 hover:text-ink"
-              }`}
-            >
-              {LABELS[value]}
-              {value === "saved" && (data?.saved ?? 0) > 0 && (
-                <span className="ml-1.5 tabular-nums opacity-70">{data?.saved}</span>
-              )}
-            </button>
-          ))}
+        {/* One row, always. Wrapping put Filter on a line of its own and made
+            the whole bar - and the list under it - jump down by a row. So the
+            four states are the part that gives: they scroll sideways on a
+            screen too narrow for them, and Filter keeps its place on the end. */}
+        <div className="flex items-center gap-x-1 text-[13px] sm:gap-x-1.5">
+          <div className="scroll-row -my-1.5 flex min-w-0 items-center gap-x-1 overflow-x-auto py-1.5 sm:gap-x-1.5">
+            {(["unread", "all", "read", "saved"] as StateFilter[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStateFilter(value)}
+                aria-pressed={stateFilter === value}
+                aria-label={LABELS[value]}
+                className={`shrink-0 rounded-full px-2.5 py-1.5 transition-colors sm:px-3 ${
+                  stateFilter === value
+                    ? "bg-sunk text-ink"
+                    : "text-muted hover:bg-sunk/60 hover:text-ink"
+                }`}
+              >
+                {/* "Everything" is the honest word and there is room for it on
+                    a desktop. A phone gets the short one. */}
+                <span className="sm:hidden">{SHORT_LABELS[value]}</span>
+                <span className="hidden sm:inline">{LABELS[value]}</span>
+                {value === "saved" && (data?.saved ?? 0) > 0 && (
+                  <span className="ml-1.5 tabular-nums opacity-70">{data?.saved}</span>
+                )}
+              </button>
+            ))}
+          </div>
 
           <span aria-hidden className="mx-1.5 hidden h-4 w-px bg-line sm:block" />
 
           {/* One menu: what kind, and who from. Either half appears only when
               there is a choice inside it. */}
-          {(describing || (data?.senders?.length ?? 0) > 1) && (
+          {(describing || people.length > 1) && (
             <FilterMenu
+              className="shrink-0"
               category={category}
               categories={describing ? categories : []}
               onCategory={setCategory}
               sender={sender}
-              people={data?.senders ?? []}
+              people={people}
               onSender={setSender}
             />
           )}
 
           {(searching || search) && (
-            <label className="ml-auto flex items-center gap-2">
+            <label className="ml-auto flex shrink-0 items-center gap-2">
               <span className="sr-only">Search these posts</span>
               <input
                 ref={searchBox}
@@ -593,6 +621,14 @@ const ICON_BUTTON =
 const LABELS: Record<StateFilter, string> = {
   unread: "Unread",
   all: "Everything",
+  read: "Read",
+  saved: "Saved",
+};
+
+/** The phone's version of the same four, where the row is 358px wide. */
+const SHORT_LABELS: Record<StateFilter, string> = {
+  unread: "Unread",
+  all: "All",
   read: "Read",
   saved: "Saved",
 };
