@@ -498,11 +498,9 @@ export default function Feed() {
 
       {session?.connected === false && (
         <p className="mb-4 border-l-2 border-danger pl-3 text-[13px] text-danger">
-          Not signed in to Instagram.{" "}
-          <Link href="/setup" className="underline underline-offset-4">
-            Sign in on the setup page
-          </Link>{" "}
-          to start reading your messages.
+          Not signed in to Instagram. Sign in from the Curated menu on the Mac -
+          it opens Instagram&apos;s own page in the browser this app uses, which is
+          why it cannot be done from here.
         </p>
       )}
 
@@ -647,14 +645,14 @@ function EmptyState({
       <div className="py-16">
         <p className="font-serif text-xl">Nothing here yet.</p>
         <p className="mt-2 max-w-[46ch] text-[14px] text-muted">
-          Sign in to Instagram on the setup page, choose whose messages to follow, and check for new
-          posts.
+          Sign in from the Curated menu on the Mac, then choose whose messages to follow
+          and check for new posts.
         </p>
         <Link
           href="/setup"
           className="mt-4 inline-block rounded-sm bg-accent px-3.5 py-2 text-[14px] text-paper"
         >
-          Go to setup
+          Choose conversations
         </Link>
       </div>
     );
