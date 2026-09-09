@@ -94,12 +94,6 @@ enum Reachability: Equatable {
     case notChecked
 }
 
-struct AgentStatus {
-    var label: String
-    var loaded: Bool
-    var running: Bool
-    var pid: Int?
-}
 
 // MARK: - Snapshot
 
@@ -140,7 +134,6 @@ struct Snapshot {
 
     var traffic: ClientTraffic?
     var site: Reachability = .notChecked
-    var agents: [AgentStatus] = []
 
     /// Derived, not reported by anything. See Poller.noteClientTraffic.
     var lastClientConnect: Date?

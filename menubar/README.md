@@ -1,4 +1,4 @@
-# CuratedBar
+# Curated
 
 A macOS menu bar app that says whether Curated is up, when it last synced, and
 whether anyone can actually reach it. It lives in `menubar/` inside the Curated
@@ -12,7 +12,7 @@ only when it changes colour.
 ## Build and install
 
 ```bash
-make app          # builds CuratedBar.app here
+make app          # builds Curated.app here
 make install      # copies it to ~/Applications
 make login-item   # optional: also start it at login
 make uninstall    # removes both
@@ -23,14 +23,14 @@ this is a Swift package plus a short Makefile that assembles the bundle, which
 keeps the whole thing editable and buildable from a terminal.
 
 **`make install` does not restart what is running, and neither does
-`launchctl kickstart`.** The login agent runs `open -a CuratedBar.app`, and
+`launchctl kickstart`.** The login agent runs `open -a Curated.app`, and
 `open` on an app that is already running activates it rather than starting it
 again - so the new binary sits in `~/Applications` while the old one keeps
 running, and a change appears to have done nothing. Quit it first:
 
 ```bash
-pkill -f "CuratedBar.app/Contents/MacOS/CuratedBar"
-launchctl kickstart gui/$(id -u)/com.curated.menubar
+pkill -f "Curated.app/Contents/MacOS/Curated"
+launchctl kickstart gui/$(id -u)/com.curated.app
 ```
 
 ## Signing, and why it matters for autostart
@@ -52,7 +52,7 @@ property to have. A certificate gives a requirement built from the bundle
 identifier and the certificate instead:
 
 ```
-designated => identifier "com.curated.menubar" and anchor apple generic
+designated => identifier "com.curated.app" and anchor apple generic
               and certificate leaf[subject.CN] = "Apple Development: ..."
 ```
 
@@ -135,19 +135,19 @@ cannot tell two visitors apart.
 The same data without a menu bar, which is useful over SSH:
 
 ```bash
-CuratedBar.app/Contents/MacOS/CuratedBar --report
-CuratedBar.app/Contents/MacOS/CuratedBar --json
+Curated.app/Contents/MacOS/Curated --report
+Curated.app/Contents/MacOS/Curated --json
 ```
 
 Any setting can be overridden for one run with a leading dash:
 
 ```bash
-CuratedBar.app/Contents/MacOS/CuratedBar --report -localBase http://127.0.0.1:3001
+Curated.app/Contents/MacOS/Curated --report -localBase http://127.0.0.1:3001
 ```
 
 Settings are `localBase`, `publicURL`, `metricsPort` and `appAgentLabel`.
 Persist one with
-`defaults write com.curated.menubar publicURL https://example.com`.
+`defaults write com.curated.app publicURL https://example.com`.
 
 `--snapshot out.png` renders the panel to a file. That is how the layout gets
 checked without clicking anything.

@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "CuratedBar",
+    name: "Curated",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "CuratedBar",
-            path: "Sources/CuratedBar",
+            name: "Curated",
+            path: "Sources/Curated",
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

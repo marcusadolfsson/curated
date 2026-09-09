@@ -134,21 +134,19 @@ final class Poller {
             }
         }
 
-        // launchd and cloudflared both mean shelling out, which blocks.
-        // Only Curated's own agent. The tunnel's agent belongs to the separate
-        // Cloudflare tunnel app.
-        let appLabel = config.appAgentLabel
+        // Discovering cloudflared's port means shelling out, which blocks.
+        //
+        // This used to ask launchctl about the server's launch agent as well.
+        // The app runs the server itself now, so the question answered itself:
+        // if the agent were not running there would be no menu to read the
+        // answer in. Server.state is the honest version of that row.
         let pinnedPort = config.metricsPort
         let cached = cachedMetricsPort
-        let local = await Task.detached(priority: .utility) { () -> ([AgentStatus], Int?) in
-            let agents = [LaunchAgents.status(label: appLabel)]
-            let port = pinnedPort ?? cached ?? Cloudflared.discoverMetricsPort()
-            return (agents, port)
+        let local = await Task.detached(priority: .utility) { () -> Int? in
+            pinnedPort ?? cached ?? Cloudflared.discoverMetricsPort()
         }.value
 
-        next.agents = local.0
-
-        if let port = local.1 {
+        if let port = local {
             if let traffic = await Cloudflared.requestCount(port: port) {
                 next.traffic = traffic
                 cachedMetricsPort = port
@@ -249,16 +247,7 @@ final class Poller {
         }
         lines.append("Client:   last connect \(snapshot.lastClientConnect == nil && snapshot.clientConnectIsSinceLaunch ? "none seen yet" : Format.relative(snapshot.lastClientConnect))")
 
-        for agent in snapshot.agents {
-            // When this app carries the server, the launch agent is meant to
-            // be absent and saying "not loaded" reads as a fault. Report who
-            // is actually running it.
-            if Server.shared.isHost {
-                lines.append("Server:   hosted by this app (\(Server.shared.summary))")
-            } else {
-                lines.append("Agent:    \(agent.label) \(agent.running ? "running" : (agent.loaded ? "loaded, not running" : "not loaded"))")
-            }
-        }
+        lines.append("Server:   \(Server.shared.isHost ? "hosted by this app (\(Server.shared.summary))" : "run from somewhere else")")
         return lines.joined(separator: "\n")
     }
 }

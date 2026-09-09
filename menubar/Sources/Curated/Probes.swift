@@ -5,11 +5,10 @@ import Foundation
 struct Config {
     var localBase = URL(string: "http://127.0.0.1:3000")!
     /// The public hostname the app is served on. Set yours with:
-    ///   defaults write com.curated.menubar publicURL https://curated.example.com
+    ///   defaults write com.curated.app publicURL https://curated.example.com
     var publicURL = URL(string: "https://curated.example.com")!
     /// Pinned metrics port, or nil to discover it from the running process.
     var metricsPort: Int?
-    var appAgentLabel = "com.curated.app"
 
     static func load() -> Config {
         let defaults = UserDefaults.standard
@@ -22,7 +21,6 @@ struct Config {
         }
         let port = defaults.integer(forKey: "metricsPort")
         if port > 0 { config.metricsPort = port }
-        if let label = defaults.string(forKey: "appAgentLabel") { config.appAgentLabel = label }
         return config
     }
 }
@@ -59,7 +57,7 @@ enum HTTP {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 6
         configuration.waitsForConnectivity = false
-        configuration.httpAdditionalHeaders = ["User-Agent": "CuratedBar/1.0"]
+        configuration.httpAdditionalHeaders = ["User-Agent": "Curated/1.0"]
         return URLSession(configuration: configuration)
     }()
 
@@ -307,36 +305,3 @@ enum PublicProbe {
     }
 }
 
-// MARK: - launchd
-
-enum LaunchAgents {
-    static func status(label: String) -> AgentStatus {
-        let uid = getuid()
-        guard let output = Shell.run("/bin/launchctl", ["print", "gui/\(uid)/\(label)"]) else {
-            return AgentStatus(label: label, loaded: false, running: false, pid: nil)
-        }
-        if output.contains("Could not find service") || output.isEmpty {
-            return AgentStatus(label: label, loaded: false, running: false, pid: nil)
-        }
-
-        // `launchctl print` nests further `state = ...` lines for each endpoint,
-        // which say "active" and would clobber the service's own state if the
-        // last one won. Take the service's first `state =`, and prefer the
-        // unambiguous `job state =` when it appears.
-        var pid: Int?
-        var running: Bool?
-        var jobState: Bool?
-
-        for line in output.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("pid = ") {
-                pid = pid ?? Int(trimmed.dropFirst("pid = ".count))
-            } else if trimmed.hasPrefix("job state = ") {
-                jobState = trimmed.contains("running")
-            } else if trimmed.hasPrefix("state = ") {
-                if running == nil { running = trimmed.contains("running") }
-            }
-        }
-        return AgentStatus(label: label, loaded: true, running: jobState ?? running ?? (pid != nil), pid: pid)
-    }
-}
