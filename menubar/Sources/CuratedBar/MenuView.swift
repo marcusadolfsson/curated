@@ -44,6 +44,7 @@ extension Health {
 struct MenuView: View {
     @Bindable var poller: Poller
     @Environment(\.openURL) private var openURL
+    @State private var confirmSignIn = false
 
     private var snapshot: Snapshot { poller.snapshot }
 
@@ -59,6 +60,16 @@ struct MenuView: View {
         }
         .padding(12)
         .frame(width: 340)
+        .alert("Sign in to Instagram?", isPresented: $confirmSignIn) {
+            Button("Open the window") { poller.beginSignIn() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Curated stops reading Instagram while the window is open - it and the "
+                    + "window share one browser. You type into Instagram's own page; your "
+                    + "password never reaches Curated."
+            )
+        }
     }
 
     // MARK: - Header
@@ -191,6 +202,20 @@ struct MenuView: View {
             MenuButton("Refresh now", shortcut: "r") {
                 poller.refreshNow()
             }
+
+            // The only item here that changes anything, so it is the only one
+            // that asks. While a window is open it says so instead, because
+            // opening a second one is not a thing that can happen.
+            if let signIn = snapshot.signIn, signIn.working {
+                MenuButton("Signing in - see the window", shortcut: nil) {
+                    openURL(poller.config.localBase.appending(path: "setup"))
+                }
+            } else {
+                MenuButton("Sign in to Instagram...", shortcut: nil) {
+                    confirmSignIn = true
+                }
+            }
+
             Divider().padding(.vertical, 4)
             MenuButton("Quit", shortcut: "q") {
                 NSApplication.shared.terminate(nil)

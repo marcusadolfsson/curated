@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import type { Browser, BrowserContext, Page } from "playwright";
-import { STORAGE_STATE_PATH, ensureDirs } from "@/lib/paths";
+import type { BrowserContext, Page } from "playwright";
+import { PROFILE_DIR, STORAGE_STATE_PATH, ensureDirs } from "@/lib/paths";
 import { asBool, getSetting, setSettings } from "@/lib/settings";
 import { RateLimitedError, SessionExpiredError } from "./errors";
 import { closeInboxTab, igJson, inboxTab } from "./tab";
@@ -16,11 +16,16 @@ export { RateLimitedError, SessionExpiredError };
  * Instagram happens in ./tab, from inside a page - never from here with the
  * cookies copied onto a Node request.
  *
- * There is no password login. Instagram's login endpoint is throttled by IP
- * and every scraper posts the same plaintext `#PWD_INSTAGRAM_BROWSER:0:`
- * password shape at it, which the real page stopped doing years ago. Signing
- * in at instagram.com in your own browser and pasting the cookie is both
- * quieter and more reliable.
+ * Nothing here posts a password. Instagram's login endpoint is throttled by IP
+ * and every scraper puts the same plaintext `#PWD_INSTAGRAM_BROWSER:0:` shape
+ * at it, which the real page stopped doing years ago - so a programmatic login
+ * is both loud and unreliable, and there is none.
+ *
+ * That is a different thing from there being no way to sign in. ./signin opens
+ * Instagram's own page in this browser and lets a person type into it; the
+ * cookies Instagram then sets are the session. The password is never ours,
+ * never read and never stored. The pasted cookie in setSessionCookie below
+ * remains as the fallback, and as the way a session arrives from elsewhere.
  */
 
 /**
@@ -59,6 +64,31 @@ function userAgentFor(browserVersion: string): string {
   return `Mozilla/5.0 (${platformToken()}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
 }
 
+/**
+ * The browser's version, asked of the binary rather than of a running browser.
+ *
+ * The user agent has to be settled before the context exists, and a persistent
+ * context has no Browser object to ask afterwards. The binary answers in a few
+ * milliseconds and the answer only changes when Playwright is updated, so it
+ * is read once per process.
+ */
+let browserVersion: string | null = null;
+async function chromiumVersion(): Promise<string> {
+  if (browserVersion !== null) return browserVersion;
+  try {
+    const { chromium } = await import("playwright");
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { stdout } = await promisify(execFile)(chromium.executablePath(), ["--version"]);
+    browserVersion = stdout.match(/(\d+\.\d+\.\d+\.\d+)/)?.[1] ?? "";
+  } catch (error) {
+    // Not fatal: userAgentFor falls back to a plausible major version.
+    console.warn("[session] could not read the browser version:", error);
+    browserVersion = "";
+  }
+  return browserVersion;
+}
+
 const IDLE_SHUTDOWN_MS = 5 * 60_000;
 
 export type LoginOutcome =
@@ -77,7 +107,10 @@ export type SessionStatus = {
 };
 
 type Runtime = {
-  browser: Browser | null;
+  /**
+   * The persistent context. There is no Browser beside it: closing a context
+   * launched against a profile closes the browser it belongs to.
+   */
   context: BrowserContext | null;
   idleTimer: NodeJS.Timeout | null;
   starting: Promise<BrowserContext> | null;
@@ -96,7 +129,6 @@ type Runtime = {
 // Next dev reloads modules; keep one browser per process.
 const globalForIg = globalThis as unknown as { __igRuntime?: Runtime };
 const runtime: Runtime = (globalForIg.__igRuntime ??= {
-  browser: null,
   context: null,
   idleTimer: null,
   starting: null,
@@ -183,41 +215,91 @@ export async function getContext(): Promise<BrowserContext> {
   }
 }
 
+/**
+ * One browser, kept over time, rather than a new one wearing old cookies.
+ *
+ * This used to launch a throwaway profile and pour the saved cookies into it.
+ * The cookies were the whole identity, so every restart introduced a browser
+ * with no history, no cache and no local storage, carrying a session that
+ * Instagram had last seen on a device with all three. A persistent profile
+ * accumulates the ordinary evidence of a browser that has been used - which is
+ * what makes signing in from here (see setSessionCookie, and the sign-in flow)
+ * read as a device Instagram already knows rather than a new one.
+ */
+/**
+ * How this browser presents itself, wherever it is launched from.
+ *
+ * Shared with the sign-in window rather than written out twice. A session made
+ * by a browser announcing one identity and then used by a browser announcing
+ * another is the mismatch the persistent profile exists to remove, and two
+ * copies of this list would drift into being exactly that.
+ *
+ * Everything but headless, which is the one thing the two callers disagree on.
+ */
+export async function browserOptions() {
+  return {
+    // The full Chromium in its new headless mode, not the headless shell. The
+    // shell announces itself: every request carried
+    //   sec-ch-ua: "HeadlessChrome";v="151"
+    // regardless of the user agent string.
+    channel: "chromium",
+    // Set on the browser rather than the context: Chromium only honours
+    // per-context proxies when it was launched with one, and there is a single
+    // browser per process anyway.
+    proxy: await proxySettings(),
+    args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
+    userAgent: userAgentFor(await chromiumVersion()),
+    viewport: { width: 1280, height: 900 },
+    locale: "en-US",
+    timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  };
+}
+
 async function startContext(): Promise<BrowserContext> {
   ensureDirs();
   const { chromium } = await import("playwright");
   const headless = asBool(await getSetting("headless"));
 
-  // Set on the browser rather than the context: Chromium only honours
-  // per-context proxies when it was launched with one, and there is a single
-  // browser per process anyway.
-  const proxy = await proxySettings();
+  // Nothing here yet: whatever cookies we hold have to be put in by hand,
+  // once, because a profile cannot be launched from a storage-state file.
+  const fresh = !fs.existsSync(PROFILE_DIR);
 
-  // The full Chromium in its new headless mode, not the headless shell. The
-  // shell announces itself: every request carried
-  //   sec-ch-ua: "HeadlessChrome";v="151"
-  // regardless of the user agent string.
-  const browser = await chromium.launch({
+  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
+    ...(await browserOptions()),
     headless,
-    channel: "chromium",
-    proxy,
-    args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-  });
-
-  const hasState = fs.existsSync(STORAGE_STATE_PATH);
-  const context = await browser.newContext({
-    userAgent: userAgentFor(browser.version()),
-    viewport: { width: 1280, height: 900 },
-    locale: "en-US",
-    timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    storageState: hasState ? STORAGE_STATE_PATH : undefined,
   });
   context.setDefaultTimeout(45_000);
 
-  runtime.browser = browser;
+  if (fresh) {
+    // Cookies are credentials, and so is everything else in here.
+    fs.chmodSync(PROFILE_DIR, 0o700);
+    await seedProfile(context);
+  }
+
   runtime.context = context;
   touchIdleTimer();
   return context;
+}
+
+/**
+ * Put the cookies we already hold into a brand new profile.
+ *
+ * Only ever on the first launch against an empty one. After that Chromium's
+ * own jar is the live copy and the session file is a backup written beside it.
+ * Local storage is deliberately not replayed: Instagram writes it again on the
+ * first load, and restoring it would mean opening instagram.com before there
+ * is any reason to.
+ */
+async function seedProfile(context: BrowserContext) {
+  if (!fs.existsSync(STORAGE_STATE_PATH)) return;
+  try {
+    const saved = JSON.parse(fs.readFileSync(STORAGE_STATE_PATH, "utf8")) as {
+      cookies?: Parameters<BrowserContext["addCookies"]>[0];
+    };
+    if (saved.cookies?.length) await context.addCookies(saved.cookies);
+  } catch (error) {
+    console.warn("[session] could not seed the new profile:", error);
+  }
 }
 
 /**
@@ -261,12 +343,11 @@ export async function closeBrowser() {
   runtime.idleTimer = null;
   if (!runtime.sessionDead) await persistState();
   await closeInboxTab();
-  const { browser, context } = runtime;
+  const { context } = runtime;
   runtime.context = null;
-  runtime.browser = null;
   try {
+    // Closing a persistent context closes the browser it was launched with.
     await context?.close();
-    await browser?.close();
   } catch {
     // already gone
   }
@@ -387,9 +468,21 @@ export async function setSessionCookie(rawSessionId: string, userId?: string): P
     });
   }
   await context.addCookies(cookies);
+  return finishSignIn(dsUserId);
+}
+
+/**
+ * Prove a session by loading the inbox with it, and record whose it is.
+ *
+ * The tail of signing in, whichever way the cookies arrived - pasted here, or
+ * put in the jar by Instagram itself at the sign-in window. A session it
+ * honours gets the inbox; one it does not gets the login page.
+ */
+export async function finishSignIn(fallbackUserId = ""): Promise<LoginOutcome> {
   runtime.sessionDead = false;
   runtime.statusCache = null;
 
+  const context = await getContext();
   let page: Page;
   try {
     page = await inboxTab({ refresh: true });
@@ -397,18 +490,18 @@ export async function setSessionCookie(rawSessionId: string, userId?: string): P
     if (error instanceof SessionExpiredError) {
       return {
         status: "failed",
-        message:
-          "Instagram did not accept that cookie. It is truncated, already expired, or was invalidated " +
-          "by signing out in the browser it was copied from.",
+        message: "Instagram did not accept that session. It is expired, or it was signed out.",
       };
     }
-    // A 429 or a network fault proves nothing about the cookie. Keep it rather
-    // than making you paste it again once the trouble clears.
+    // A 429 or a network fault proves nothing about the session. Keep it
+    // rather than making you sign in again once the trouble clears.
     await saveState(context);
     const why = error instanceof Error ? error.message : String(error);
     return {
       status: "unverified",
-      message: `Cookie saved, but it could not be checked yet${error instanceof RateLimitedError ? " (Instagram is rate-limiting this address)" : ""}: ${why}`,
+      message: `Session saved, but it could not be checked yet${
+        error instanceof RateLimitedError ? " (Instagram is rate-limiting this address)" : ""
+      }: ${why}`,
     };
   }
 
@@ -416,7 +509,7 @@ export async function setSessionCookie(rawSessionId: string, userId?: string): P
   const identity = await whoAmI(page);
   await setSettings({
     sessionUsername: identity.username ?? "",
-    sessionUserId: identity.userId ?? dsUserId,
+    sessionUserId: identity.userId ?? fallbackUserId,
   });
   await saveState(context);
 

@@ -91,6 +91,20 @@ struct CuratedAPI {
         try await HTTP.get(SessionPayload.self, from: base.appending(path: "api/session"))
     }
 
+    func signIn() async throws -> SignInPayload {
+        try await HTTP.get(SignInPayload.self, from: base.appending(path: "api/session/signin"))
+    }
+
+    /// The one write this app makes. Opens Instagram's login page in Curated's
+    /// own browser; the app stops reading Instagram while it stands open.
+    @discardableResult
+    func beginSignIn() async throws -> SignInPayload {
+        var request = URLRequest(url: base.appending(path: "api/session/signin"))
+        request.httpMethod = "POST"
+        let (data, _) = try await HTTP.session.data(for: request)
+        return try JSON.decoder.decode(SignInPayload.self, from: data)
+    }
+
     /// Returns every post as well as the counts, so this is deliberately on a
     /// slow timer. It is the only expensive read here.
     func counts() async throws -> CountsPayload {
