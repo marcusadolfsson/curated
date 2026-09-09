@@ -44,12 +44,6 @@ extension Health {
 struct MenuView: View {
     @Bindable var poller: Poller
     @Environment(\.openURL) private var openURL
-    @State private var confirmSignIn = false
-    @State private var confirmSignOut = false
-    @State private var askForToken = false
-    @State private var token = ""
-    @State private var askForCookie = false
-    @State private var cookie = ""
 
     private var snapshot: Snapshot { poller.snapshot }
 
@@ -65,58 +59,6 @@ struct MenuView: View {
         }
         .padding(12)
         .frame(width: 340)
-        .alert("Sign in to Instagram?", isPresented: $confirmSignIn) {
-            Button("Open the window") { poller.beginSignIn() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "Curated stops reading Instagram while the window is open - it and the "
-                    + "window share one browser. You type into Instagram's own page; your "
-                    + "password never reaches Curated."
-            )
-        }
-        .alert("Sign out of Instagram?", isPresented: $confirmSignOut) {
-            Button("Sign out", role: .destructive) { poller.signOut() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "The saved session is deleted and Curated stops reading anything until "
-                    + "you sign in again. Signing back in is a fresh login, which is the "
-                    + "one thing worth doing rarely."
-            )
-        }
-        .alert("Claude token", isPresented: $askForToken) {
-            // A plain field, not SecureField: this is pasted rather than typed
-            // from memory, and a row of dots makes a mispaste impossible to see.
-            TextField("sk-ant-...", text: $token)
-            Button("Save") { poller.setClaudeToken(token); token = "" }
-            if snapshot.claude?.stored == true {
-                Button("Remove", role: .destructive) { poller.clearClaudeToken(); token = "" }
-            }
-            Button("Cancel", role: .cancel) { token = "" }
-        } message: {
-            Text(
-                "Make one with `claude setup-token`. It is written to "
-                    + "~/.curated/claude-token and used straight away - no restart. "
-                    + "Without it Curated still reads and files posts; it just stops "
-                    + "describing and categorising them."
-            )
-        }
-        .alert("Paste a session cookie", isPresented: $askForCookie) {
-            TextField("sessionid", text: $cookie)
-            Button("Use it") {
-                poller.pasteSessionCookie(cookie)
-                cookie = ""
-            }
-            Button("Cancel", role: .cancel) { cookie = "" }
-        } message: {
-            Text(
-                "The fallback for when the sign-in window cannot get past something. "
-                    + "Sign in at instagram.com in your own browser, then copy the "
-                    + "sessionid cookie from developer tools. Keep that browser signed "
-                    + "in: logging out there ends this session too."
-            )
-        }
     }
 
     // MARK: - Header
@@ -281,17 +223,37 @@ struct MenuView: View {
                 }
             } else if snapshot.session?.connected == true {
                 MenuButton("Sign out of Instagram...", shortcut: nil) {
-                    confirmSignOut = true
+                    Dialogs.confirm(
+                        "Sign out of Instagram?",
+                        message: "The saved session is deleted and Curated stops reading "
+                            + "anything until you sign in again. Signing back in is a fresh "
+                            + "login, which is the one thing worth doing rarely.",
+                        action: "Sign Out",
+                        destructive: true
+                    ) { poller.signOut() }
                 }
             } else {
                 MenuButton("Sign in to Instagram...", shortcut: nil) {
-                    confirmSignIn = true
+                    Dialogs.confirm(
+                        "Sign in to Instagram?",
+                        message: "Curated stops reading Instagram while the window is open - "
+                            + "it and the window share one browser. You type into Instagram's "
+                            + "own page; your password never reaches Curated.",
+                        action: "Open the Window"
+                    ) { poller.beginSignIn() }
                 }
                 // The fallback, next to the thing it is a fallback for, and
                 // only when signed out - which is the only time it is any use.
                 MenuButton("Paste a session cookie...", shortcut: nil) {
-                    cookie = ""
-                    askForCookie = true
+                    Dialogs.prompt(
+                        "Paste a session cookie",
+                        message: "The fallback for when the sign-in window cannot get past "
+                            + "something. Sign in at instagram.com in your own browser, then "
+                            + "copy the sessionid cookie from developer tools. Keep that "
+                            + "browser signed in: logging out there ends this session too.",
+                        placeholder: "sessionid",
+                        action: "Use It"
+                    ) { poller.pasteSessionCookie($0) }
                 }
             }
 
@@ -299,8 +261,17 @@ struct MenuView: View {
                 snapshot.claude?.ok == true ? "Replace Claude token..." : "Add a Claude token...",
                 shortcut: nil
             ) {
-                token = ""
-                askForToken = true
+                Dialogs.prompt(
+                    "Claude token",
+                    message: "Make one with `claude setup-token`. It is written to "
+                        + "~/.curated/claude-token and used straight away - no restart. "
+                        + "Without it Curated still reads and files posts; it just stops "
+                        + "describing and categorising them.",
+                    placeholder: "sk-ant-...",
+                    action: "Save",
+                    removeTitle: snapshot.claude?.stored == true ? "Remove" : nil,
+                    remove: { poller.clearClaudeToken() }
+                ) { poller.setClaudeToken($0) }
             }
 
             // Only in a bundle that carries its own server and has not got a
