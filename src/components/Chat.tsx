@@ -24,7 +24,12 @@ type Message = {
   senderId: string | null;
   at: string | null;
   shortcode: string | null;
-  post: { id: number; summary: string | null } | null;
+  post: {
+    id: number;
+    summary: string | null;
+    mediaType: string | null;
+    thumbnail: string | null;
+  } | null;
 };
 
 type Conversation = {
@@ -185,6 +190,51 @@ export default function Chat() {
     }
   };
 
+  const SharePreview = ({ message, mine }: { message: Message; mine: boolean }) => {
+    const href = `https://www.instagram.com/p/${message.shortcode}/`;
+    const isVideo = message.post?.mediaType === "reel" || message.post?.mediaType === "tv";
+
+    // Nothing kept for this one - it predates the sync, or was never imported.
+    // Say what it was rather than showing an empty frame.
+    if (!message.post?.thumbnail) {
+      return (
+        <Link
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          className={`line-clamp-2 text-[15px] underline-offset-4 hover:underline ${
+            mine ? "text-paper/80" : "text-muted"
+          }`}
+        >
+          {message.post?.summary ?? "Shared a post"}
+        </Link>
+      );
+    }
+
+    return (
+      <Link
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        aria-label={message.post.summary ?? "Open this post on Instagram"}
+        className="relative block aspect-[4/5] w-14 shrink-0 overflow-hidden rounded-lg bg-sunk ring-1 ring-black/[0.08] dark:ring-white/[0.10]"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={message.post.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
+        {isVideo && (
+          <span
+            aria-hidden
+            className="absolute bottom-1 left-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/20"
+          >
+            <svg viewBox="0 0 10 12" className="ml-[1px] h-2.5 w-2.5 fill-white">
+              <path d="M0 0l10 6-10 6z" />
+            </svg>
+          </span>
+        )}
+      </Link>
+    );
+  };
+
   const nameOf = (senderId: string | null) => {
     if (!senderId) return "";
     const user = chat?.users?.find((u) => u.id === senderId);
@@ -248,22 +298,18 @@ export default function Chat() {
                         mine ? "bg-accent text-paper" : "bg-surface text-ink"
                       }`}
                     >
-                      {message.shortcode && (
-                        <Link
-                          href={`https://www.instagram.com/p/${message.shortcode}/`}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          // A share is a mention of a post, not the post: two
-                          // lines of what it is, so the talking around it stays
-                          // the thing you read.
-                          className={`mb-1 line-clamp-2 text-[15px] underline-offset-4 hover:underline ${
-                            mine ? "text-paper/80" : "text-muted"
-                          }`}
-                        >
-                          {message.post?.summary ?? "Shared a post"}
-                        </Link>
+                      {message.shortcode ? (
+                        // A share is the picture and whatever was said about
+                        // it, side by side. It used to be two lines describing
+                        // the post, which is the one thing a thumbnail says
+                        // better than a sentence.
+                        <div className="flex items-start gap-2.5">
+                          <SharePreview message={message} mine={mine} />
+                          {message.text && <span className="min-w-0">{message.text}</span>}
+                        </div>
+                      ) : (
+                        message.text
                       )}
-                      {message.text}
                     </div>
                     <p
                       className={`mt-0.5 text-[12px] text-muted ${mine ? "pr-3 text-right" : "pl-3"}`}

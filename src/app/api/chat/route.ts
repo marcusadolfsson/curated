@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
 import { isSessionKnownDead } from "@/lib/instagram/client";
@@ -69,18 +69,40 @@ export async function GET(request: NextRequest) {
     // What the app already knows about the posts mentioned, so a share reads
     // as the thing it is rather than a bare link.
     const codes = messages.map((m) => m.shortcode).filter((c): c is string => Boolean(c));
+    // Only the posts this page actually mentions. This had no where clause, so
+    // every poll - and the page polls every few seconds while you are reading -
+    // pulled the whole table across to match a handful of shortcodes.
     const known = codes.length
-      ? await db.select({ id: posts.id, shortcode: posts.shortcode, summary: posts.summary }).from(posts)
+      ? await db
+          .select({
+            id: posts.id,
+            shortcode: posts.shortcode,
+            summary: posts.summary,
+            mediaType: posts.mediaType,
+            thumbnailFile: posts.thumbnailFile,
+          })
+          .from(posts)
+          .where(inArray(posts.shortcode, codes))
       : [];
     const byCode = new Map(known.map((p) => [p.shortcode, p]));
 
     return NextResponse.json({
       ...base,
       users,
-      messages: messages.map((message) => ({
-        ...message,
-        post: message.shortcode ? (byCode.get(message.shortcode) ?? null) : null,
-      })),
+      messages: messages.map((message) => {
+        const post = message.shortcode ? (byCode.get(message.shortcode) ?? null) : null;
+        return {
+          ...message,
+          post: post
+            ? {
+                id: post.id,
+                summary: post.summary,
+                mediaType: post.mediaType,
+                thumbnail: post.thumbnailFile ? `/api/media/${post.thumbnailFile}` : null,
+              }
+            : null,
+        };
+      }),
     });
   } catch (error) {
     return NextResponse.json(
