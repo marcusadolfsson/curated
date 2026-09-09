@@ -288,14 +288,14 @@ export default function Feed() {
   }, [data?.categories]);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-24 sm:px-6">
+    <div className="mx-auto max-w-4xl px-4 pb-24 sm:px-6">
       {/* Nothing but the dark until the post is up. The list is behind it
           either way; showing it first only advertises the wait. */}
       {launching && !preview && <div className="fixed inset-0 z-50 bg-black md:hidden" />}
-      <header className="flex flex-wrap items-end justify-between gap-4 pt-10 pb-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 pt-8 pb-5 sm:pt-10 sm:pb-6">
         <div>
-          <h1 className="font-serif text-4xl leading-none tracking-tight">Curated</h1>
-          <p className="mt-2 text-[14px] text-muted">
+          <h1 className="font-serif text-[34px] leading-none tracking-tight sm:text-[40px]">Curated</h1>
+          <p className="mt-2 text-[14px] text-muted sm:text-[15px]">
             {headline(data, session)}
             {watcher?.listening && (
               <span className="ml-2 inline-flex items-center gap-1.5 text-accent">
@@ -306,17 +306,21 @@ export default function Feed() {
           </p>
         </div>
 
-        <div className="flex items-center gap-4 text-[14px]">
-          <Link href="/chat" className="text-accent underline-offset-4 hover:underline">
-            Chat
-          </Link>
-          <Link href="/report" className="text-accent underline-offset-4 hover:underline">
-            Report
-          </Link>
-          <Link href="/setup" className="text-accent underline-offset-4 hover:underline">
-            Setup
-          </Link>
-        </div>
+        <nav className="flex items-center gap-1 text-[14px]" aria-label="Pages">
+          {[
+            ["/chat", "Chat"],
+            ["/report", "Report"],
+            ["/setup", "Setup"],
+          ].map(([href, label]) => (
+            <Link
+              key={href}
+              href={href}
+              className="rounded-full px-3 py-1.5 text-ink-soft transition-colors hover:bg-sunk hover:text-ink"
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
       </header>
 
       {sync && (sync.running || sync.phase === "error" || sync.postsAdded > 0) && (
@@ -349,27 +353,28 @@ export default function Feed() {
         </p>
       )}
 
-      <div className="sticky top-0 z-10 -mx-4 mb-1 border-y border-line bg-paper/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
+      <div className="sticky top-0 z-10 -mx-4 mb-1 border-b border-line bg-paper/92 px-4 py-2.5 backdrop-blur sm:-mx-6 sm:px-6">
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px] sm:gap-x-1.5">
           {(["unread", "all", "read", "saved"] as StateFilter[]).map((value) => (
             <button
               key={value}
               type="button"
               onClick={() => setStateFilter(value)}
-              className={
+              aria-pressed={stateFilter === value}
+              className={`rounded-full px-3 py-1.5 transition-colors ${
                 stateFilter === value
-                  ? "text-ink underline decoration-accent decoration-2 underline-offset-[6px]"
-                  : "text-muted hover:text-ink"
-              }
+                  ? "bg-sunk text-ink"
+                  : "text-muted hover:bg-sunk/60 hover:text-ink"
+              }`}
             >
               {LABELS[value]}
               {value === "saved" && (data?.saved ?? 0) > 0 && (
-                <span className="ml-1.5 text-muted">{data?.saved}</span>
+                <span className="ml-1.5 tabular-nums opacity-70">{data?.saved}</span>
               )}
             </button>
           ))}
 
-          <span aria-hidden className="h-4 w-px bg-line" />
+          <span aria-hidden className="mx-1.5 hidden h-4 w-px bg-line sm:block" />
 
           {describing && (
             <CategoryMenu value={category} categories={categories} onChange={setCategory} />
@@ -382,7 +387,7 @@ export default function Feed() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search"
-              className="w-32 border-b border-line bg-transparent pb-0.5 text-[13px] placeholder:text-muted focus:border-accent focus:outline-none"
+              className="w-28 rounded-full bg-sunk/70 px-3 py-1.5 text-[13px] placeholder:text-muted focus:bg-sunk focus:outline-none focus:ring-2 focus:ring-accent/60 sm:w-40"
             />
           </label>
         </div>
