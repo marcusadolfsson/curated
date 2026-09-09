@@ -1,3 +1,4 @@
+import { analysisAvailable } from "@/lib/claude-auth";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, syncRuns, threads, type Post } from "@/db/schema";
@@ -290,7 +291,7 @@ async function runSync() {
   if (added.length > 0) await prefetchVideos(added);
 
   // 4. Describe everything that has not been described yet.
-  if (asBool(settings.autoAnalyze)) {
+  if (asBool(settings.autoAnalyze) && analysisAvailable()) {
     const pending = await db
       .select()
       .from(posts)

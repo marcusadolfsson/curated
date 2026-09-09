@@ -19,6 +19,19 @@ export type ClaudeAuth = {
   detail: string;
 };
 
+/**
+ * Whether the describing half of the app is switched on at all.
+ *
+ * Claude is optional. With no credential the app is still a reader: it
+ * collects what people send you, keeps read and unread, saves, reacts and
+ * replies. What it does not do is invent a description or a category, so the
+ * post's own caption stands in and the category rail is left out entirely
+ * rather than showing a column of "not described yet".
+ */
+export function analysisAvailable(): boolean {
+  return claudeAuth().ok;
+}
+
 export function claudeAuth(): ClaudeAuth {
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {

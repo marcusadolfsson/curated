@@ -8,12 +8,15 @@ import type { PostView } from "@/lib/serialize";
 
 type Props = {
   post: PostView;
+  /** False with no Claude credential: no description, no category, no status. */
+  describing?: boolean;
   onToggleSaved: (id: number, saved: boolean) => Promise<void>;
   onPreview: (post: PostView) => void;
 };
 
 export default function PostRow({
   post,
+  describing = true,
   onToggleSaved,
   onPreview,
 }: Props) {
@@ -88,10 +91,12 @@ export default function PostRow({
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
-          <span className="flex items-center gap-1.5 text-ink-soft">
-            <span aria-hidden className="dot h-2 w-2 rounded-full" />
-            {post.category ?? statusLabel(post)}
-          </span>
+          {describing && (
+            <span className="flex items-center gap-1.5 text-ink-soft">
+              <span aria-hidden className="dot h-2 w-2 rounded-full" />
+              {post.category ?? statusLabel(post)}
+            </span>
+          )}
           {post.mediaType === "reel" && <span className="text-muted">reel</span>}
           <span className="text-muted">
             {post.senderUsername ? `from ${post.senderUsername}` : "shared with you"}

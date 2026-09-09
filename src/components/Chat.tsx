@@ -40,13 +40,24 @@ type Conversation = {
 const SAFETY_NET_MS = 45_000;
 const WATCHER_POLL_MS = 3_000;
 
+type Followed = { threadId: string; title: string | null; participants: string[] };
+
 export default function Chat() {
   const [chat, setChat] = useState<Conversation | null>(null);
+  /** The conversations you follow, so more than one can be talked to. */
+  const [followed, setFollowed] = useState<Followed[]>([]);
+  /**
+   * Which one is open. Held in the URL as well as in state, so a reload or a
+   * shared link comes back to the same conversation rather than to whichever
+   * the server would have picked.
+   */
+  const [threadId, setThreadId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const chosen = useRef<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const lastEvent = useRef<string | null>(null);
   const inFlight = useRef(false);
@@ -55,9 +66,18 @@ export default function Chat() {
     if (inFlight.current || document.visibilityState === "hidden") return;
     inFlight.current = true;
     try {
-      const response = await fetch("/api/chat");
-      if (response.ok) setChat((await response.json()) as Conversation);
-      else setNotice("No conversation is being watched. Pick one under Setup.");
+      const wanted = chosen.current;
+      const response = await fetch(wanted ? `/api/chat?threadId=${encodeURIComponent(wanted)}` : "/api/chat");
+      if (response.ok) {
+        const conversation = (await response.json()) as Conversation;
+        setChat(conversation);
+        // The server decides when nothing was asked for. Adopt its answer so
+        // the picker agrees with what is on screen.
+        if (!chosen.current && conversation.threadId) {
+          chosen.current = conversation.threadId;
+          setThreadId(conversation.threadId);
+        }
+      } else setNotice("No conversation is being watched. Pick one under Setup.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -67,9 +87,42 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("thread");
+    if (fromUrl) {
+      chosen.current = fromUrl;
+      setThreadId(fromUrl);
+    }
     const timer = setTimeout(load, 0);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    void fetch("/api/threads")
+      .then((response) => (response.ok ? response.json() : { threads: [] }))
+      .then((body: { threads?: (Followed & { watch: boolean })[] }) =>
+        setFollowed((body.threads ?? []).filter((thread) => thread.watch)),
+      )
+      .catch(() => {
+        // only used to fill the picker; the conversation itself still loads
+      });
+  }, []);
+
+  /** Switching conversation: replace the URL rather than stacking history. */
+  const openThread = useCallback(
+    (id: string) => {
+      if (id === chosen.current) return;
+      chosen.current = id;
+      setThreadId(id);
+      setChat(null);
+      setLoading(true);
+      setNotice(null);
+      const url = new URL(window.location.href);
+      url.searchParams.set("thread", id);
+      window.history.replaceState(null, "", url);
+      void load();
+    },
+    [load],
+  );
 
   // The socket is the doorbell: when the watcher hears something and this page
   // is in front of you, read the thread straight away.
@@ -118,7 +171,7 @@ export default function Chat() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, threadId: chosen.current ?? undefined }),
       });
       const body = (await response.json()) as { ok?: boolean; error?: string };
       if (body.ok) {
@@ -144,9 +197,28 @@ export default function Chat() {
     // where the box you type in lives.
     <div className="mx-auto flex h-[calc(100dvh-env(safe-area-inset-top))] max-w-2xl flex-col px-4 sm:px-6">
       <header className="flex shrink-0 items-baseline justify-between gap-4 pb-2 pt-3">
-        <h1 className="min-w-0 truncate font-serif text-2xl leading-none tracking-tight">
-          {chat?.title ?? "Chat"}
-        </h1>
+        {/* One conversation is a heading. Several is a choice, and it belongs
+            where the heading was rather than tucked away in a menu. */}
+        {followed.length > 1 ? (
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">Which conversation</span>
+            <select
+              value={threadId ?? ""}
+              onChange={(event) => openThread(event.target.value)}
+              className="-ml-1 w-full max-w-full cursor-pointer truncate rounded-sm bg-transparent px-1 font-serif text-2xl leading-none tracking-tight text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              {followed.map((thread) => (
+                <option key={thread.threadId} value={thread.threadId}>
+                  {thread.title ?? thread.participants.join(", ") ?? "Conversation"}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <h1 className="min-w-0 truncate font-serif text-2xl leading-none tracking-tight">
+            {chat?.title ?? "Chat"}
+          </h1>
+        )}
         <Link href="/" className="shrink-0 whitespace-nowrap text-[14px] text-accent underline-offset-4 hover:underline">
           Back to Curated
         </Link>

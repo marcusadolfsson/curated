@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNull, like, or, type SQL } from "drizzle-orm"
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
 import { toPostView } from "@/lib/serialize";
+import { analysisAvailable } from "@/lib/claude-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -92,5 +93,8 @@ export async function GET(request: NextRequest) {
     saved: everything.filter((row) => row.saved).length,
     shown: inScope.length,
     categories: counts,
+    // Without a Claude credential nothing is described or categorised, and the
+    // interface should not offer filters for a thing that will stay empty.
+    analysis: analysisAvailable(),
   });
 }

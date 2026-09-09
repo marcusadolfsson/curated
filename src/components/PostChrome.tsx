@@ -37,6 +37,8 @@ type Props = {
   onReact: (id: number, emoji: string) => Promise<void>;
   onReply: (id: number, text: string) => Promise<string | null>;
   onChangeCategory: (id: number, category: string) => Promise<void>;
+  /** False with no Claude credential: no categories exist to choose between. */
+  describing?: boolean;
   closeRef?: RefObject<HTMLButtonElement | null>;
   /**
    * How far the card has been dragged down, so the picture above can take back
@@ -55,6 +57,7 @@ export default function PostChrome({
   onReact,
   onReply,
   onChangeCategory,
+  describing = true,
   closeRef,
   onSheetOffset,
 }: Props) {
@@ -237,14 +240,16 @@ export default function PostChrome({
   const header = (
     <div className="flex items-baseline justify-between gap-4 border-b border-line px-4 py-3">
       <p className="flex min-w-0 flex-1 items-baseline gap-1.5 font-serif text-[15px] text-ink">
-        <CategoryMenu
-          value={category}
-          categories={CATEGORIES.map((name) => [name, null])}
-          onChange={changeCategory}
-          anyLabel={null}
-          align="left"
-          className="font-serif text-[15px]"
-        />
+        {describing && (
+          <CategoryMenu
+            value={category}
+            categories={CATEGORIES.map((name) => [name, null])}
+            onChange={changeCategory}
+            anyLabel={null}
+            align="left"
+            className="font-serif text-[15px]"
+          />
+        )}
         {post.authorUsername && (
           <span className="min-w-0 truncate text-ink-soft">from @{post.authorUsername}</span>
         )}
@@ -530,15 +535,17 @@ export default function PostChrome({
               from {senderName} · {relativeTime(post.sharedAt)}
             </p>
           </div>
-          <CategoryMenu
-            value={category}
-            categories={CATEGORIES.map((name) => [name, null])}
-            onChange={changeCategory}
-            anyLabel={null}
-            align="right"
-            tone="dark"
-            className="rounded-full bg-white/10 px-3 py-1.5 text-[13px]"
-          />
+          {describing && (
+            <CategoryMenu
+              value={category}
+              categories={CATEGORIES.map((name) => [name, null])}
+              onChange={changeCategory}
+              anyLabel={null}
+              align="right"
+              tone="dark"
+              className="rounded-full bg-white/10 px-3 py-1.5 text-[13px]"
+            />
+          )}
           </div>
         </div>
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
 import { isSessionKnownDead } from "@/lib/instagram/client";
@@ -23,10 +23,25 @@ export const maxDuration = 60;
 
 async function chosenThread(threadId: string | null) {
   if (threadId) {
-    const [named] = await db.select().from(threads).where(eq(threads.threadId, threadId)).limit(1);
+    // Named, but still only one you follow: this decides what a chat request
+    // may read and send to, so it should not reach a conversation you have
+    // not opted into.
+    const [named] = await db
+      .select()
+      .from(threads)
+      .where(and(eq(threads.threadId, threadId), eq(threads.watch, true)))
+      .limit(1);
     return named ?? null;
   }
-  const watched = await db.select().from(threads).where(and(eq(threads.watch, true)));
+  // No thread asked for: the one that spoke most recently, rather than
+  // whichever row the database happened to return first. With several
+  // followed that was arbitrary, and there was no way to tell which you had
+  // been given.
+  const watched = await db
+    .select()
+    .from(threads)
+    .where(eq(threads.watch, true))
+    .orderBy(desc(threads.lastItemAt));
   return watched[0] ?? null;
 }
 

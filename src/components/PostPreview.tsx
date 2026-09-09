@@ -40,6 +40,8 @@ type Props = {
   onReact: (id: number, emoji: string) => Promise<void>;
   onReply: (id: number, text: string) => Promise<string | null>;
   onChangeCategory: (id: number, category: string) => Promise<void>;
+  /** False with no Claude credential: nothing is described or categorised. */
+  describing?: boolean;
 };
 
 /** How long the picture takes to settle once you let go. */
@@ -109,6 +111,7 @@ export default function PostPreview({
   onReact,
   onReply,
   onChangeCategory,
+  describing = true,
 }: Props) {
   const phone = useMediaQuery(PHONE);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -396,6 +399,7 @@ export default function PostPreview({
           onReact={onReact}
           onReply={onReply}
           onChangeCategory={onChangeCategory}
+          describing={describing}
         />
       </div>
     );
@@ -524,6 +528,7 @@ export default function PostPreview({
             onReact={onReact}
             onReply={onReply}
             onChangeCategory={onChangeCategory}
+            describing={describing}
             closeRef={closeRef}
           />
         </div>

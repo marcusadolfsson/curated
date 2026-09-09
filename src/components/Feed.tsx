@@ -25,6 +25,8 @@ type FeedResponse = {
   unread: number;
   saved: number;
   categories: Record<string, number>;
+  /** False when there is no Claude credential: nothing is described or filed. */
+  analysis?: boolean;
 };
 
 type SessionInfo = { connected: boolean; username: string | null };
@@ -277,6 +279,9 @@ export default function Feed() {
     void loadFeed();
   };
 
+  /** Default true, so the filter does not blink out while the first load runs. */
+  const describing = data?.analysis ?? true;
+
   const categories = useMemo(() => {
     const entries = Object.entries(data?.categories ?? {});
     return entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -366,7 +371,9 @@ export default function Feed() {
 
           <span aria-hidden className="h-4 w-px bg-line" />
 
-          <CategoryMenu value={category} categories={categories} onChange={setCategory} />
+          {describing && (
+            <CategoryMenu value={category} categories={categories} onChange={setCategory} />
+          )}
 
           <label className="ml-auto flex items-center gap-2">
             <span className="sr-only">Search these posts</span>
@@ -389,6 +396,7 @@ export default function Feed() {
             <PostRow
               key={post.id}
               post={post}
+              describing={describing}
               onToggleSaved={toggleSaved}
               onPreview={openPreview}
             />
@@ -413,6 +421,7 @@ export default function Feed() {
           onReact={react}
           onReply={replyTo}
           onChangeCategory={(id, category) => patch(id, { category })}
+          describing={describing}
         />
       )}
     </div>

@@ -51,6 +51,11 @@ caption and writes a line saying what it actually is, files it under a
 category, and names the things in it. A hundred anonymous thumbnails become a
 list you can scan in a few seconds — and search.
 
+This part is optional. Run it without a Claude credential and nothing is
+described or categorised: the post's own caption stands in, the category rail
+and filter are simply not there, and everything else — unread, saving,
+reactions, replies, the chat — works exactly the same.
+
 **4. Save the ones worth coming back to.** The recipe you meant to cook, the
 paint colour, the place. Kept in one list instead of scrolled past and lost.
 
@@ -142,7 +147,8 @@ rate limits and, eventually, a locked account.
 
 Whichever way you run it:
 
-- A **Claude credential** for the analysis agent. The SDK resolves it the way
+- A **Claude credential**, if you want posts described and categorised. Leave
+  it out and that half of the app switches off cleanly; see feature 3. The SDK resolves it the way
   the CLI does - `CLAUDE_CODE_OAUTH_TOKEN` from the environment, an
   `ANTHROPIC_API_KEY`, or a login at `~/.claude/.credentials.json`. Both
   deployed paths use the first: a long-lived token from `claude setup-token`,
