@@ -244,6 +244,16 @@ struct MenuView: View {
                 SleepGuard.shared.enabled.toggle()
             }
 
+            // Reads its state from macOS, so turning it off in System Settings
+            // shows here too.
+            MenuToggle(
+                LoginItem.shared.blocked ? "Start at login (blocked in Settings)" : "Start at login",
+                isOn: LoginItem.shared.enabled || LoginItem.shared.blocked,
+                failed: LoginItem.shared.blocked
+            ) {
+                LoginItem.shared.toggle()
+            }
+
             Divider().padding(.vertical, 4)
 
             // The writes. Each one asks first: a menu is easy to hit by

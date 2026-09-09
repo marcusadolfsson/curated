@@ -22,7 +22,7 @@ SIGN_ID := $(shell security find-identity -v -p codesigning 2>/dev/null | \
              awk -F'"' '/Apple Development/{print $$2; exit}')
 endif
 
-.PHONY: all build app standalone sign copy run install install-standalone uninstall login-item clean
+.PHONY: all build app standalone sign copy run install install-standalone uninstall clean
 
 all: app
 
@@ -109,32 +109,17 @@ copy:
 	@echo "Installed to $(INSTALL)/$(BUNDLE) ($$(du -sh $(INSTALL)/$(BUNDLE) | cut -f1))"
 	@echo "Already running? It will not be replaced until you quit it:"
 	@echo "  pkill -f '$(APP).app/Contents/MacOS/$(APP)'"
+	@echo "Open it once and it offers to start at login; the menu has a toggle."
 
-## Optional: start it at login. Whatever is installed - run `install` or
-## `install-standalone` first. It used to depend on `install`, which meant
-## asking for a login item quietly rebuilt the small app over the full one.
-login-item:
-	@mkdir -p $(HOME)/Library/LaunchAgents
-	@printf '%s\n' \
-	  '<?xml version="1.0" encoding="UTF-8"?>' \
-	  '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-	  '<plist version="1.0">' \
-	  '<dict>' \
-	  '  <key>Label</key><string>$(AGENT)</string>' \
-	  '  <key>ProgramArguments</key>' \
-	  '  <array><string>/usr/bin/open</string><string>-a</string><string>$(INSTALL)/$(BUNDLE)</string></array>' \
-	  '  <key>RunAtLoad</key><true/>' \
-	  '</dict>' \
-	  '</plist>' > $(PLIST)
-	-launchctl bootout gui/$$(id -u)/$(AGENT) 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(PLIST)
-	@echo "Will start at login. Remove with: make uninstall"
-
+## Removes the app, and the LaunchAgent plist if an older build left one.
+##
+## The login item itself belongs to macOS now - the app registers it with
+## SMAppService and macOS drops it when the bundle goes.
 uninstall:
 	-launchctl bootout gui/$$(id -u)/$(AGENT) 2>/dev/null
 	rm -f $(PLIST)
 	rm -rf $(INSTALL)/$(BUNDLE)
-	@echo "Removed"
+	@echo "Removed. Check System Settings > General > Login Items if an entry lingers."
 
 clean:
 	rm -rf .build $(BUNDLE)

@@ -175,14 +175,15 @@ shim against seventeen of its own dylibs and cannot be copied anywhere.
 It is one app.
 
 ```bash
-cd menubar && make install-standalone && make login-item
+cd menubar && make install-standalone
 ```
 
-That builds **Curated.app** - about 390 MB - and puts it in `~/Applications`,
-starting at login. It carries its own Node and its own built server and runs
-them as a child process, so there is no Homebrew, no checkout to keep, no plist
-to edit and no `sudo`. Everything after that is in the menu bar: sign in to
-Instagram, paste a Claude token, keep the Mac awake.
+That builds **Curated.app** - about 390 MB - and puts it in `~/Applications`.
+Open it once and it offers to start at login. It carries its own Node and its
+own built server and runs them as a child process, so there is no Homebrew, no
+checkout to keep, no plist to edit and no `sudo`. Everything after that is in
+the menu bar: sign in to Instagram, paste a Claude token, start at login, keep
+the Mac awake.
 
 Chromium is the one thing it does not carry. It is 356 MB, it is somebody
 else's signed code, and putting it inside a signed bundle means signing every

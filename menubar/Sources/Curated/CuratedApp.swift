@@ -45,6 +45,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Poller.shared.start()
             // Takes the assertion back if the toggle was left on.
             SleepGuard.shared.restore()
+            offerToStartAtLogin()
+        }
+    }
+
+    /// Asked once, on a fresh install, and never again.
+    ///
+    /// A menu bar app that watches an inbox is close to useless if it does not
+    /// come back after a reboot, so not offering would be unhelpful - but
+    /// registering silently decides something about somebody's machine for
+    /// them. The menu toggle is there either way.
+    /// After launch, never during it.
+    ///
+    /// `runModal` blocks the main run loop, and starting the server is a task
+    /// on the main actor - so asking this from inside
+    /// applicationDidFinishLaunching left the app sitting behind a dialog with
+    /// no server running until somebody clicked it. By the time this fires the
+    /// server is up, and a modal that pauses the menu for a moment costs
+    /// nothing.
+    @MainActor
+    private func offerToStartAtLogin() {
+        guard LoginItem.shared.shouldOffer else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            MainActor.assumeIsolated { self.askAboutLogin() }
+        }
+    }
+
+    @MainActor
+    private func askAboutLogin() {
+        guard LoginItem.shared.shouldOffer else { return }
+        LoginItem.shared.rememberAsked()
+
+        let alert = NSAlert()
+        alert.messageText = "Start Curated at login?"
+        alert.informativeText =
+            "Curated has to be running to hear about new posts, so it is worth having it "
+            + "come back after a restart. You can change this any time from the menu, or in "
+            + "System Settings under Login Items."
+        alert.addButton(withTitle: "Start at Login")
+        alert.addButton(withTitle: "Not Now")
+        if alert.runModal() == .alertFirstButtonReturn {
+            LoginItem.shared.toggle()
         }
     }
 

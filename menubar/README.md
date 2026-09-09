@@ -1,9 +1,13 @@
 # Curated
 
-A macOS menu bar app that says whether Curated is up, when it last synced, and
-whether anyone can actually reach it. It lives in `menubar/` inside the Curated
-repo on purpose: it reads Curated's own endpoints, so the two should move
-together.
+The Curated app. It carries the server, starts it, supervises it, and says in
+the menu bar whether it is up, when it last synced and whether anyone can reach
+it. It lives in `menubar/` inside the Curated repo because it ships the server
+built from it, so the two have to move together.
+
+Built with `make install` instead, it is only the menu bar half, watching a
+server somebody else runs - which is the fast loop when the menu is what you
+are changing.
 
 The icon is the whole point. It stays a plain monochrome dot while everything is
 healthy, and turns orange or red the moment something needs looking at. Open it
@@ -12,26 +16,27 @@ only when it changes colour.
 ## Build and install
 
 ```bash
-make app          # builds Curated.app here
-make install      # copies it to ~/Applications
-make login-item   # optional: also start it at login
-make uninstall    # removes both
+make app                  # builds Curated.app here, without the server
+make install-standalone   # the whole thing: menu bar app, Node, server
+make install              # just the menu bar app, for working on it
+make uninstall            # removes it
 ```
 
 Requires the Swift toolchain that ships with Xcode. There is no `.xcodeproj`:
 this is a Swift package plus a short Makefile that assembles the bundle, which
 keeps the whole thing editable and buildable from a terminal.
 
-**`make install` does not restart what is running, and neither does
-`launchctl kickstart`.** The login agent runs `open -a Curated.app`, and
-`open` on an app that is already running activates it rather than starting it
-again - so the new binary sits in `~/Applications` while the old one keeps
-running, and a change appears to have done nothing. Quit it first:
+**Installing does not replace what is already running.** `open` on an app that
+is running activates it rather than launching the new copy, so the new binary
+sits in `~/Applications` while the old one carries on and the change appears to
+have done nothing. Quit it first:
 
 ```bash
 pkill -f "Curated.app/Contents/MacOS/Curated"
-launchctl kickstart gui/$(id -u)/com.curated.app
 ```
+
+The server is a child process and stops with it, so this is also how to restart
+the whole thing.
 
 ## Signing, and why it matters for autostart
 
@@ -59,12 +64,12 @@ designated => identifier "com.curated.app" and anchor apple generic
 which is byte-for-byte identical after a rebuild. The signature is timestamped,
 so it stays valid once the signing certificate eventually expires.
 
-Autostart itself is keyed on the launch agent's path rather than the signature,
-so an ad-hoc build does still start at login. What a stable identity buys is
-everything macOS attaches to an app's identity rather than its location: login
-item registration that is not re-evaluated on each build, and any permission
-grant the app might later need. This app needs no permission grants today, which
-is why an ad-hoc build works at all.
+Autostart depends on this directly now. The login item is registered by the app
+itself through `SMAppService`, and macOS tracks it by bundle identity rather
+than by a path in a plist - so an identity that changes on every build is an
+app macOS keeps having to be introduced to. It is also what makes moving or
+renaming the bundle harmless, and what puts a single entry in System Settings
+rather than one per build.
 
 Handing the app to anyone else is a separate problem and needs Developer ID plus
 notarisation.
@@ -145,26 +150,27 @@ Any setting can be overridden for one run with a leading dash:
 Curated.app/Contents/MacOS/Curated --report -localBase http://127.0.0.1:3001
 ```
 
-Settings are `localBase`, `publicURL`, `metricsPort` and `appAgentLabel`.
-Persist one with
+Settings are `localBase`, `publicURL` and `metricsPort`. Persist one with
 `defaults write com.curated.app publicURL https://example.com`.
+
+`--start-at-login` and `--no-start-at-login` register or remove the login item
+without opening the menu.
 
 `--snapshot out.png` renders the panel to a file. That is how the layout gets
 checked without clicking anything.
 
 ## What it deliberately does not do
 
-It never writes. Every route it touches is a GET, and it never sends a POST or a
-DELETE to any of them, because on this app those are not idle verbs: `POST
-/api/sync` starts a sync, `POST /api/watch` starts the watcher, `POST
-/api/pause` pauses it, and `POST /api/session/egress` makes a real request to
-Instagram to find out what address it sees.
+Almost every route it touches is a GET, and the writes are counted on one hand:
+signing in, signing out, setting the Claude credential. Those earn it by being
+what you reach for when the app has stopped doing its job, which is when the
+menu bar is where you are looking. Each one asks first, because a menu is easy
+to hit by accident.
 
-There are no start, stop or restart controls for the launch agent either.
-`com.curated.app` is supervised with `KeepAlive`, so stopping it from here would
-only make it flap, and restarting it mid-sync closes a live browser session
-against an account Instagram is happy to lock. Anything that changes
-state belongs in a terminal, where it is deliberate.
+Everything else stays a read. It does not start a sync, start or stop the
+watcher, or pause anything, because on this app those are not idle verbs - and
+restarting mid-sync closes a live browser session against an account Instagram
+is happy to lock. Those belong in a terminal, where they are deliberate.
 
 The one request it makes off the machine is the reachability probe, once a
 minute, to your own hostname. It never touches Instagram.
