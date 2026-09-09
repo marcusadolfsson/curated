@@ -496,6 +496,12 @@ export default function PostPreview({
               video={post.video}
               poster={post.thumbnail}
               permalink={post.permalink}
+              // Contain, not the component's default of cover. The pane here
+              // is wider than it is tall and a reel is the opposite, so filling
+              // it crops the top and bottom away - which on a reel is where the
+              // caption someone burned into it usually sits. Photos in the
+              // gallery beside this already letterbox for the same reason.
+              fit="contain"
               onRemaining={setRemaining}
             />
           ) : (
