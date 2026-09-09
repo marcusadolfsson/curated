@@ -59,14 +59,20 @@ export default function Feed() {
   const searchBox = useRef<HTMLInputElement | null>(null);
   /** A post asked for by ?post=<id>, until it has been opened. */
   const wanted = useRef<number | null>(null);
+  /** The query string the data on screen came from. */
+  const loadedQuery = useRef<string>("");
 
   const loadFeed = useCallback(async () => {
     const query = new URLSearchParams({ state: stateFilter, category });
     if (sender !== "all") query.set("sender", sender);
     if (search.trim()) query.set("q", search.trim());
 
+    const asked = query.toString();
     const response = await fetch(`/api/posts?${query}`);
-    if (response.ok) setData((await response.json()) as FeedResponse);
+    if (response.ok) {
+      loadedQuery.current = asked;
+      setData((await response.json()) as FeedResponse);
+    }
     setLoading(false);
   }, [stateFilter, category, sender, search]);
 
@@ -91,14 +97,22 @@ export default function Feed() {
   // Once the pile holding it has arrived, open it.
   useEffect(() => {
     if (wanted.current === null || !data) return;
+
     const post = data.posts.find((p) => p.id === wanted.current);
-    if (!post) {
-      wanted.current = null; // not in the feed at all: leave the list alone
+    if (post) {
+      wanted.current = null;
+      setSequence(data.posts);
+      setPreview(post);
       return;
     }
-    wanted.current = null;
-    setSequence(data.posts);
-    setPreview(post);
+
+    // Not here - but the first payload to land is usually the unread list the
+    // page opens with, and a post being linked to from the conversation has
+    // almost always been read. Only give up once the whole pile has actually
+    // arrived, rather than on whatever answered first.
+    if (loadedQuery.current === new URLSearchParams({ state: "all", category: "all" }).toString()) {
+      wanted.current = null;
+    }
   }, [data]);
 
   useEffect(() => {
@@ -185,6 +199,12 @@ export default function Feed() {
   };
 
   const closePreview = () => {
+    // Give the hash entry back, and let its listener do the closing, so the X
+    // and the back gesture end in exactly the same state.
+    if (hashHeld.current) {
+      window.history.back();
+      return;
+    }
     const current = showing.current ?? preview;
     if (current && current.id !== landedOn.current) markRead(current);
     landedOn.current = null;
@@ -200,6 +220,44 @@ export default function Feed() {
   useEffect(() => {
     showing.current = preview;
   }, [preview]);
+
+  /**
+   * A post is a place, so back should leave the post rather than the app.
+   *
+   * Without an entry of its own the phone's back gesture ran on the page
+   * history: swipe right out of a reel and you landed on whatever you had
+   * visited before the feed, which for anyone who had opened the chat was the
+   * chat.
+   *
+   * The entry is a location hash rather than history.pushState. Next patches
+   * pushState and answers it by re-rendering the route, which resets this
+   * component and closes the very post it was asked to remember. A hash change
+   * pushes a real history entry without going anywhere near that.
+   */
+  const hashHeld = useRef(false);
+  useEffect(() => {
+    if (!preview) return;
+
+    if (window.location.hash !== "#post") {
+      window.location.hash = "post";
+      hashHeld.current = true;
+    }
+
+    const onHashChange = () => {
+      if (window.location.hash === "#post") return; // still open
+      hashHeld.current = false;
+      const current = showing.current;
+      if (current && current.id !== landedOn.current) markRead(current);
+      landedOn.current = null;
+      setPreview(null);
+    };
+
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+    // Only as the preview opens and closes; stepping between posts keeps the
+    // one entry rather than stacking one per post.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview !== null]);
 
   // On a phone the app opens on the first unread post, full screen, and does
   // so again every time it comes back to the foreground - the list is where
