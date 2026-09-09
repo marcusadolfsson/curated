@@ -85,11 +85,43 @@ final class Poller {
         act { try await $0.clearClaudeToken() }
     }
 
+    /// The fallback when the sign-in window cannot get past something.
+    ///
+    /// Instagram rejects a truncated or retired cookie by simply not loading
+    /// the inbox, and the reason comes back in the response - so unlike the
+    /// other actions here, this one has something to say when it fails.
+    func pasteSessionCookie(_ sessionId: String) {
+        Task {
+            let api = CuratedAPI(base: config.localBase)
+            do {
+                let outcome = try await api.setSessionCookie(sessionId)
+                lastActionMessage = outcome.status == "ok"
+                    ? nil
+                    : (outcome.message ?? "That cookie was not accepted.")
+            } catch {
+                lastActionMessage = error.localizedDescription
+            }
+            await refresh()
+        }
+    }
+
+    /// What the last write said, when it said anything. Shown in the menu
+    /// until the next one: a token or a cookie that was refused used to fail
+    /// in silence, which reads as the button doing nothing.
+    private(set) var lastActionMessage: String?
+
+    func clearActionMessage() { lastActionMessage = nil }
+
     /// Do the thing, then look again, so the menu reflects it immediately
     /// rather than at whatever point the next tick lands.
     private func act(_ body: @escaping (CuratedAPI) async throws -> Void) {
         Task {
-            try? await body(CuratedAPI(base: config.localBase))
+            do {
+                try await body(CuratedAPI(base: config.localBase))
+                lastActionMessage = nil
+            } catch {
+                lastActionMessage = error.localizedDescription
+            }
             await refresh()
         }
     }

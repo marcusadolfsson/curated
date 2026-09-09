@@ -490,8 +490,36 @@ export async function setSessionCookie(rawSessionId: string, userId?: string): P
       sameSite: "Lax" as const,
     });
   }
+  // Put the old ones back if the new one turns out to be no good.
+  //
+  // The cookie goes into the live profile before anything can prove it, since
+  // proving it means loading the inbox with it. So a truncated paste, or one
+  // copied from a browser that has since signed out, replaced a working
+  // session with a broken one and left you signed out of an app you had been
+  // signed in to a moment earlier. Now a refusal costs nothing.
+  const previous = await context.cookies("https://www.instagram.com");
+
   await context.addCookies(cookies);
-  return finishSignIn(dsUserId);
+  const outcome = await finishSignIn(dsUserId);
+
+  // Anything but a proven success, and only when there was something to go
+  // back to. "unverified" is the awkward one: it means the check could not be
+  // made rather than that the cookie is bad, and keeping it is right when
+  // there was no session before. When there was a working one, an unproven
+  // cookie is not worth trading a known-good session for.
+  const hadSession = previous.some((cookie) => cookie.name === "sessionid" && cookie.value);
+  if (outcome.status !== "ok" && hadSession) {
+    try {
+      await context.clearCookies();
+      if (previous.length) await context.addCookies(previous);
+      runtime.sessionDead = false;
+      runtime.statusCache = null;
+    } catch (error) {
+      console.warn("[session] could not put the previous cookies back:", error);
+    }
+  }
+
+  return outcome;
 }
 
 /**

@@ -48,6 +48,8 @@ struct MenuView: View {
     @State private var confirmSignOut = false
     @State private var askForToken = false
     @State private var token = ""
+    @State private var askForCookie = false
+    @State private var cookie = ""
 
     private var snapshot: Snapshot { poller.snapshot }
 
@@ -98,6 +100,21 @@ struct MenuView: View {
                     + "~/.curated/claude-token and used straight away - no restart. "
                     + "Without it Curated still reads and files posts; it just stops "
                     + "describing and categorising them."
+            )
+        }
+        .alert("Paste a session cookie", isPresented: $askForCookie) {
+            TextField("sessionid", text: $cookie)
+            Button("Use it") {
+                poller.pasteSessionCookie(cookie)
+                cookie = ""
+            }
+            Button("Cancel", role: .cancel) { cookie = "" }
+        } message: {
+            Text(
+                "The fallback for when the sign-in window cannot get past something. "
+                    + "Sign in at instagram.com in your own browser, then copy the "
+                    + "sessionid cookie from developer tools. Keep that browser signed "
+                    + "in: logging out there ends this session too."
             )
         }
     }
@@ -270,6 +287,12 @@ struct MenuView: View {
                 MenuButton("Sign in to Instagram...", shortcut: nil) {
                     confirmSignIn = true
                 }
+                // The fallback, next to the thing it is a fallback for, and
+                // only when signed out - which is the only time it is any use.
+                MenuButton("Paste a session cookie...", shortcut: nil) {
+                    cookie = ""
+                    askForCookie = true
+                }
             }
 
             MenuButton(
@@ -295,6 +318,23 @@ struct MenuView: View {
                         Browser.shared.fetch()
                     }
                 }
+            }
+
+            // What the last write said, when it had anything to say. Dismissed
+            // by clicking it, so it does not sit there after it is dealt with.
+            if let message = poller.lastActionMessage {
+                Button(action: { poller.clearActionMessage() }) {
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
 
             Divider().padding(.vertical, 4)
