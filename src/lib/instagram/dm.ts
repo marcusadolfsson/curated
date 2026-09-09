@@ -10,7 +10,7 @@ import { igJson } from "./tab";
  * like a post: an object carrying a shortcode, or a plain instagram.com link.
  */
 
-export type DmUser = { id: string; username: string };
+export type DmUser = { id: string; username: string; avatarUrl: string | null };
 
 export type DmThreadSummary = {
   threadId: string;
@@ -300,7 +300,14 @@ function toUsers(value: unknown): DmUser[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter(isJson)
-    .map((user) => ({ id: str(user.pk) ?? "", username: str(user.username) ?? "" }))
+    .map((user) => ({
+      id: str(user.pk) ?? "",
+      username: str(user.username) ?? "",
+      // Instagram sends this beside the name and it was being dropped. Like
+      // every CDN URL here it is signed and short-lived, so it is only useful
+      // long enough to copy the picture locally.
+      avatarUrl: str(user.profile_pic_url) ?? null,
+    }))
     .filter((user) => user.id !== "" && user.username !== "");
 }
 

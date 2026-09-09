@@ -57,6 +57,13 @@
       "when": 1788653314642,
       "tag": "0007_sticky_scarecrow",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788920349530,
+      "tag": "0008_clean_molecule_man",
+      "breakpoints": true
     }
   ]
 }

@@ -67,6 +67,40 @@ export async function downloadThumbnail(
   return filename;
 }
 
+/**
+ * The sender's picture, beside what they said.
+ *
+ * Small and square: it is shown at 28px and never larger, so there is no point
+ * keeping the original. Cached by account id and only fetched when it is
+ * missing - a face does not change between two posts on a Tuesday, and this
+ * runs inside the same loop that reads a thread.
+ */
+export async function downloadAvatar(
+  senderId: string,
+  url: string | null,
+): Promise<string | null> {
+  if (!url || !senderId) return null;
+  const filename = `avatar-${senderId}.jpg`;
+  if (mediaExists(filename)) return filename;
+  ensureDirs();
+
+  const response = await igFetch(url);
+  if (!response.ok) return null;
+
+  try {
+    const { default: sharp } = await import("sharp");
+    const data = await sharp(response.body)
+      .resize(144, 144, { fit: "cover", position: "attention" })
+      .jpeg({ quality: 82, mozjpeg: true })
+      .toBuffer();
+    await fs.promises.writeFile(path.join(MEDIA_DIR, filename), data);
+    return filename;
+  } catch (error) {
+    console.warn(`[media] could not keep an avatar for ${senderId}:`, error);
+    return null;
+  }
+}
+
 export function mediaPath(filename: string): string {
   return path.join(MEDIA_DIR, filename);
 }

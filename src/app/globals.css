@@ -100,11 +100,6 @@ body {
   background: oklch(var(--spine-lightness) var(--spine-chroma) var(--hue, 220));
 }
 
-/* The sender's own words, in the category's colour, so the quote and the
-   spine read as one thing. */
-.quote {
-  border-color: oklch(var(--spine-lightness) var(--spine-chroma) var(--hue, 220) / 0.7);
-}
 
 :focus-visible {
   outline: 2px solid var(--accent);

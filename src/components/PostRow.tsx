@@ -105,9 +105,14 @@ export default function PostRow({
           )}
 
           {post.messageText && (
-            <p className="quote mt-3 max-w-[52ch] border-l-2 pl-3 font-serif text-[15px] leading-snug text-ink-soft sm:text-[16px]">
-              {post.messageText}
-            </p>
+            <div className="mt-3 flex max-w-[52ch] items-start gap-2.5">
+              <SenderAvatar post={post} />
+              {/* Square off the corner nearest the face, so the bubble points
+                  at whoever said it - the shape every message app uses. */}
+              <p className="min-w-0 rounded-2xl rounded-tl-md bg-sunk px-3 py-2 font-serif text-[15px] leading-snug text-ink-soft sm:text-[16px]">
+                {post.messageText}
+              </p>
+            </div>
           )}
         </div>
 
@@ -175,6 +180,40 @@ export default function PostRow({
         <BookmarkIcon filled={post.saved} />
       </button>
     </article>
+  );
+}
+
+/**
+ * Whoever sent it. A picture when we have one, their initial when we do not -
+ * never an empty grey disc, which reads as something still loading.
+ */
+function SenderAvatar({ post }: { post: PostView }) {
+  const name = post.senderUsername?.trim() ?? "";
+  const initial = name ? name[0]!.toUpperCase() : "?";
+  const shell =
+    "mt-0.5 h-7 w-7 shrink-0 overflow-hidden rounded-full ring-1 ring-black/[0.08] dark:ring-white/[0.10]";
+
+  if (post.senderAvatar) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={post.senderAvatar}
+        alt=""
+        width={28}
+        height={28}
+        loading="lazy"
+        className={`${shell} object-cover`}
+      />
+    );
+  }
+
+  return (
+    <span
+      aria-hidden
+      className={`${shell} flex items-center justify-center bg-sunk text-[12px] font-medium text-muted`}
+    >
+      {initial}
+    </span>
   );
 }
 

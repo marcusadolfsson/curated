@@ -14,6 +14,7 @@ export type PostView = {
   /** The app already holds what this post needs to show, so opening it costs nothing. */
   mediaReady: boolean;
   senderUsername: string | null;
+  senderAvatar: string | null;
   sharedAt: string | null;
   viewed: boolean;
   saved: boolean;
@@ -48,6 +49,7 @@ export function toPostView(post: Post): PostView {
         : // A photo post with nothing to ask Instagram for shows its own cover.
           post.images !== null || post.mediaId === null,
     senderUsername: post.senderUsername,
+    senderAvatar: post.senderAvatarFile ? `/api/media/${post.senderAvatarFile}` : null,
     sharedAt: (post.sharedAt ?? post.createdAt)?.toISOString() ?? null,
     viewed: post.viewed,
     saved: post.saved,

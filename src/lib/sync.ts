@@ -19,7 +19,7 @@ import {
   type Json,
 } from "@/lib/instagram/dm";
 import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
-import { downloadThumbnail } from "@/lib/instagram/media";
+import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
 import { analyzeAndStore, analysisConcurrency } from "@/lib/analyze";
 import { pause } from "@/lib/pace";
@@ -200,6 +200,16 @@ async function runSync() {
         await db.update(threads).set({ threadV2Id }).where(eq(threads.threadId, threadId));
       }
       const usernameById = new Map(users.map((user) => [user.id, user.username]));
+      // Once per person per thread. downloadAvatar keeps what it already has,
+      // so a returning sender costs nothing.
+      const avatarById = new Map(
+        await Promise.all(
+          users.map(
+            async (user) =>
+              [user.id, await downloadAvatar(user.id, user.avatarUrl).catch(() => null)] as const,
+          ),
+        ),
+      );
       state.itemsScanned += items.length;
 
       let foundInThread = 0;
@@ -254,6 +264,7 @@ async function runSync() {
               (shared.senderId ? usernameById.get(shared.senderId) : null) ??
               titles.get(threadId) ??
               null,
+            senderAvatarFile: shared.senderId ? (avatarById.get(shared.senderId) ?? null) : null,
             sharedAt: shared.sharedAt,
           })
           .returning({ id: posts.id });

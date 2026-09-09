@@ -33,6 +33,8 @@ export const posts = sqliteTable(
     messageId: text("messageId"),
     senderId: text("senderId"),
     senderUsername: text("senderUsername"),
+    /** Their profile picture, copied locally. Denormalised like the name. */
+    senderAvatarFile: text("senderAvatarFile"),
     sharedAt: integer("sharedAt", { mode: "timestamp" }),
 
     /** The emoji the model picked for this post; what actually gets sent. */
