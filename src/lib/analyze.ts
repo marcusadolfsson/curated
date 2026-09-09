@@ -15,13 +15,22 @@ import { agentEnv, claudeAuth } from "@/lib/claude-auth";
  * This runs through the Claude Agent SDK, which drives the locally installed
  * Claude Code - so it uses this machine's existing Claude credentials and needs
  * no API key. The agent gets one tool, Read, pointed at the downloaded
- * thumbnail: most reels say nothing useful in the caption, and the picture is
- * the only real signal.
+ * thumbnail.
+ *
+ * It used to say here that the picture is the only real signal because most
+ * reels say nothing useful in their caption. Measured over 1,107 described
+ * posts that is not true: 78% carry a substantial caption once hashtags,
+ * credits and emoji are stripped, median 136 characters - and only about a
+ * fifth of the words in the summaries were coming from them. The caption is
+ * where the facts live; the picture is what fills the gaps and carries the
+ * 22% that have nothing to say. Hence the order the prompt works in.
  */
 
 export type Analysis = {
   category: string;
   summary: string;
+  captionStrength: string | null;
+  sentiment: string | null;
   items: string[];
   reaction: string;
   reply: string;
@@ -31,27 +40,43 @@ export type AnalysisResult =
   | { ok: true; analysis: Analysis; model: string | null; costUsd: number }
   | { ok: false; error: string };
 
-const REPLY_GUIDE = `Also draft the reply the recipient might text back to the sender about this post. It is a starting point they will edit, never sent as is. Write it the way one half of a couple texts the other: first person, one short sentence, maybe two, lowercase-casual is fine, no greeting and no sign-off. React to the specific thing in the post - the dish, the place, the trick - the way you would if you had just watched it. Answer whatever the sender's own note asks or suggests ("should we try this?"). No hashtags, no marketing tone, at most one emoji and usually none.`;
+const REPLY_GUIDE = `It is a starting point the reader will edit, never sent as is. Write it the way one half of a couple texts the other: first person, one short sentence, maybe two, lowercase-casual is fine, no greeting and no sign-off. React to the specific thing in the post - the dish, the place, the trick - the way you would if you had just watched it. Answer whatever the sender's own note asks or suggests ("should we try this?"). Match the sentiment you just named - do not be warm about something you called forgettable. No hashtags, no marketing tone, at most one emoji and usually none.`;
 
-const SYSTEM_PROMPT = `You describe posts that someone shared over Instagram DMs, for a private feed its owner reads later.
+const SYSTEM_PROMPT = `You write the one line a private feed shows above a post someone shared over Instagram DMs. The reader can already see the picture. Your job is to tell them what they cannot see.
 
-Say what the post actually is, plainly and without selling it. Report only what you can see or read - never invent detail that is not in the image or caption. If the post is unreadable, say so in the summary and use the category "Other".
+Work in this order, and fill the fields in this order.
 
-Write the summary the way you would describe it to someone across the room:
+1. WEIGH THE CAPTION. The caption is the author's own account of the post, and usually the only place the facts live. Strip the packaging: hooks like "send this to", hashtags, @credits, "link in bio", emoji, and marketing voice. Translate anything not in English. Then judge what survives:
+   - "rich": real information - a place, a price, a time, a method, a list, a claim, a punchline.
+   - "thin": a few words, a mood, a joke with no substance behind it.
+   - "none": no caption, or nothing left once the packaging is gone.
 
-- Two sentences at most, and one is usually enough.
-- Lead with the thing itself. Do not open with "A reel that", "This post shows", or the account name - the feed already shows who posted it.
-- Do not repeat the sender's own note back; it is displayed next to your summary.
-- Keep the specifics that make it worth opening: quantities, places, materials, times.
+2. READ THE PICTURE. Take what the caption leaves out or is vague about: what the thing actually is, where it is, what it is made of, what is happening. When the caption is thin or none the picture carries the whole line - never return a weak line just because the caption was weak.
 
-Also choose the emoji to react with in the thread, as the person receiving this would. Pick the one a person would actually tap after looking at the post - not the warmest available. Reserve the strongest for posts that earn it; when nothing stands out, say so with a mild one.
+3. WRITE THE LINE, from both. One sentence, two at the very most.
+   The voice matters more than any single word:
+   - Plain and declarative. Present tense. Lead with the thing itself.
+   - Never sell it. No "stunning", "gorgeous", "must-see", "a must", "game changer".
+   - Specifics over adjectives: the place, the number, the material, the method.
+   - Never narrate what the picture plainly shows. "A man holds a blanket on a bed" tells the reader nothing.
+   - Never open with "A reel that", "This post shows", or the account name.
+   - Do not repeat the sender's own note; it is shown beside your line.
 
-${REPLY_GUIDE}`;
+4. NAME THE SENTIMENT of the line you just wrote - the register the post is in and what it asks of the reader. A few words, lowercase: "practical, worth saving", "funny, no substance", "aspirational travel", "a real skill on show". The emoji and the reply both come from this, so it must fit the line rather than the picture in general.
+
+5. PICK THE EMOJI from that sentiment, as the person receiving this would - the one they would actually tap, not the warmest available. Reserve the strongest for posts that earn it; when nothing stands out, say so with a mild one.
+
+6. DRAFT THE REPLY from that same sentiment. ${REPLY_GUIDE}`;
 
 
 const OUTPUT_SCHEMA = {
   type: "object",
   properties: {
+    captionStrength: {
+      type: "string",
+      enum: ["rich", "thin", "none"],
+      description: "How much the caption carried once hooks, hashtags, credits and marketing voice were stripped.",
+    },
     category: {
       type: "string",
       enum: [...CATEGORIES],
@@ -60,7 +85,7 @@ const OUTPUT_SCHEMA = {
     summary: {
       type: "string",
       description:
-        "At most two plain sentences saying what the post is. No preamble, no marketing language, and no restating the sender's note.",
+        "One sentence, two at most, saying what the reader cannot already see. Built from the stripped caption and the picture together. No preamble, no marketing language, no narrating the image, and no restating the sender's note.",
     },
     items: {
       type: "array",
@@ -68,6 +93,11 @@ const OUTPUT_SCHEMA = {
       maxItems: 8,
       description:
         "Concrete things the post names or calls for - ingredients, materials, products, places, exercises. Short noun phrases. Empty if the post names nothing concrete.",
+    },
+    sentiment: {
+      type: "string",
+      description:
+        "A few lowercase words naming the register of the line you wrote and what it asks of the reader. The emoji and the reply both follow from this.",
     },
     reaction: {
       type: "string",
@@ -80,7 +110,7 @@ const OUTPUT_SCHEMA = {
         "A short, casual first-person reply to the sender about this post, one or two sentences, specific to what is in it. A draft they will edit.",
     },
   },
-  required: ["category", "summary", "items", "reaction", "reply"],
+  required: ["captionStrength", "category", "summary", "items", "sentiment", "reaction", "reply"],
   additionalProperties: false,
 } as const;
 
@@ -105,7 +135,7 @@ export async function analyzePost(post: Post): Promise<AnalysisResult> {
     .join("\n");
 
   const prompt = [
-    "Describe this shared Instagram post.",
+    "Write the line for this shared Instagram post.",
     "",
     facts,
     settings.analysisInstructions.trim()
@@ -174,6 +204,8 @@ export async function analyzeAndStore(post: Post): Promise<AnalysisResult> {
         summary: result.analysis.summary,
         items: JSON.stringify(result.analysis.items),
         suggestedReaction: result.analysis.reaction,
+        captionStrength: result.analysis.captionStrength,
+        sentiment: result.analysis.sentiment,
         draftReply: result.analysis.reply || null,
         analysisModel: result.model,
         analysisCostUsd: result.costUsd,
@@ -211,7 +243,12 @@ function coerceAnalysis(value: unknown): Analysis | null {
 
   const reply = typeof record.reply === "string" ? record.reply.trim() : "";
 
-  return { category, summary, items, reaction, reply };
+  const captionStrength =
+    typeof record.captionStrength === "string" ? record.captionStrength : null;
+  const sentiment =
+    typeof record.sentiment === "string" && record.sentiment.trim() ? record.sentiment.trim() : null;
+
+  return { category, summary, items, reaction, reply, captionStrength, sentiment };
 }
 
 /**

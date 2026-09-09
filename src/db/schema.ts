@@ -70,6 +70,10 @@ export const posts = sqliteTable(
     category: text("category"),
     summary: text("summary"),
     items: text("items"), // JSON array of strings
+    /** How much the caption carried, once its packaging was stripped. */
+    captionStrength: text("captionStrength"),
+    /** The register of the summary. The emoji and the draft reply follow it. */
+    sentiment: text("sentiment"),
     analysisModel: text("analysisModel"),
     analysisCostUsd: real("analysisCostUsd"),
     analysisError: text("analysisError"),
