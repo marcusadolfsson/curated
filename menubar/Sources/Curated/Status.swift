@@ -109,6 +109,14 @@ struct SignInPayload: Decodable {
     var working: Bool { ["opening", "waiting", "verifying"].contains(phase) }
 }
 
+/// What the server made of a pasted session cookie: "ok", "unverified" when
+/// it could not be checked yet, or "failed" with a reason.
+struct LoginOutcomePayload: Decodable {
+    var status: String
+    var username: String?
+    var message: String?
+}
+
 /// Whether the analysis half of the app has a credential. Never the token.
 struct ClaudeTokenPayload: Decodable {
     var ok: Bool

@@ -118,6 +118,19 @@ struct CuratedAPI {
         _ = try await HTTP.session.data(for: request)
     }
 
+    /// The pasted-cookie fallback. Only the sessionid: ds_user_id was always
+    /// optional, and who the session belongs to is read off the inbox page it
+    /// loads rather than taken on trust from a second field.
+    @discardableResult
+    func setSessionCookie(_ sessionId: String) async throws -> LoginOutcomePayload {
+        try await write(
+            "api/session/cookie",
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: ["sessionId": sessionId]),
+            as: LoginOutcomePayload.self
+        )
+    }
+
     @discardableResult
     func setClaudeToken(_ token: String) async throws -> ClaudeTokenPayload {
         try await write(
