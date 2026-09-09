@@ -25,8 +25,11 @@ export async function register() {
   setTimeout(prune, 30_000).unref?.();
   setInterval(prune, 6 * 3600_000).unref?.();
 
-  // A stop (deploy, restart) should leave the live cookies on disk, not the
-  // ones from whenever the session was pasted. closeBrowser saves them first.
+  // Best effort, and only that: Next takes the same signal and ends the
+  // process before closeBrowser's first await comes back, so this rarely
+  // finishes. What actually keeps the cookies on disk is the timer in
+  // ./lib/instagram/client - see SAVE_EVERY_MS. Left in because when it does
+  // get to run it closes the browser tidily.
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
       void closeBrowser().finally(() => process.exit(0));
