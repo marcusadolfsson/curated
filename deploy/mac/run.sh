@@ -31,4 +31,12 @@ export PORT="${PORT:-3000}"
 # cloud box ran and a Mac mini handles it comfortably.
 export ANALYSIS_CONCURRENCY="${ANALYSIS_CONCURRENCY:-3}"
 
-exec npx next start -p "$PORT" -H 127.0.0.1
+# Next directly, not through npx.
+#
+# launchd signals the process it started, and `npx next start` made that npm,
+# with the server as its child. npm does not pass SIGTERM on before it goes, so
+# a stop never reached the handler that saves the live cookies and closes the
+# browser - the app was killed outright and went back to whatever was last
+# written when the inbox loaded. Running the server as the process launchd
+# supervises puts the signal where the handler is.
+exec node node_modules/next/dist/bin/next start -p "$PORT" -H 127.0.0.1

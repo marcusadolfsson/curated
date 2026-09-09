@@ -90,6 +90,17 @@ async function chromiumVersion(): Promise<string> {
 }
 
 const IDLE_SHUTDOWN_MS = 5 * 60_000;
+/**
+ * How often the live cookies are copied to disk while the browser is open.
+ *
+ * There is a handler that saves them on SIGTERM, and it does not run: Next
+ * takes the same signal and ends the process before an await can finish, so a
+ * stop went back to whatever was last written when the inbox happened to load.
+ * Nothing saved only at exit is safe anyway - a SIGKILL, a panic or the power
+ * going is exactly the same story - so the file is kept fresh on a timer while
+ * the browser is up, and the exit handler is left as a best effort on top.
+ */
+const SAVE_EVERY_MS = 5 * 60_000;
 
 export type LoginOutcome =
   | { status: "ok"; username: string | null }
@@ -113,6 +124,8 @@ type Runtime = {
    */
   context: BrowserContext | null;
   idleTimer: NodeJS.Timeout | null;
+  /** Copies the cookies to disk while the browser is up. See SAVE_EVERY_MS. */
+  saveTimer: NodeJS.Timeout | null;
   starting: Promise<BrowserContext> | null;
   statusCache: { at: number; status: SessionStatus } | null;
   /** Things that need the browser to stay open, like the realtime watcher. */
@@ -131,6 +144,7 @@ const globalForIg = globalThis as unknown as { __igRuntime?: Runtime };
 const runtime: Runtime = (globalForIg.__igRuntime ??= {
   context: null,
   idleTimer: null,
+  saveTimer: null,
   starting: null,
   statusCache: null,
   holds: 0,
@@ -277,6 +291,13 @@ async function startContext(): Promise<BrowserContext> {
   }
 
   runtime.context = context;
+
+  if (runtime.saveTimer) clearInterval(runtime.saveTimer);
+  runtime.saveTimer = setInterval(() => {
+    if (!runtime.sessionDead) void persistState();
+  }, SAVE_EVERY_MS);
+  runtime.saveTimer.unref?.();
+
   touchIdleTimer();
   return context;
 }
@@ -341,6 +362,8 @@ export async function egressAddress(): Promise<{ ip: string | null; via: string 
 export async function closeBrowser() {
   if (runtime.idleTimer) clearTimeout(runtime.idleTimer);
   runtime.idleTimer = null;
+  if (runtime.saveTimer) clearInterval(runtime.saveTimer);
+  runtime.saveTimer = null;
   if (!runtime.sessionDead) await persistState();
   await closeInboxTab();
   const { context } = runtime;
