@@ -6,7 +6,8 @@ import PostRow from "./PostRow";
 import PostPreview from "./PostPreview";
 import CategoryMenu from "./CategoryMenu";
 import HeaderMenu from "./HeaderMenu";
-import { ChatIcon } from "./icons";
+import PersonMenu, { type Person } from "./PersonMenu";
+import { ChatIcon, SearchIcon } from "./icons";
 import type { PostView } from "@/lib/serialize";
 import type { SyncState } from "@/lib/sync";
 import { PHONE, useMediaQuery } from "@/lib/useMediaQuery";
@@ -27,6 +28,7 @@ type FeedResponse = {
   unread: number;
   saved: number;
   categories: Record<string, number>;
+  senders?: Person[];
   /** False when there is no Claude credential: nothing is described or filed. */
   analysis?: boolean;
 };
@@ -47,21 +49,26 @@ export default function Feed() {
   const [watcher, setWatcher] = useState<Watcher | null>(null);
   const [stateFilter, setStateFilter] = useState<StateFilter>("unread");
   const [category, setCategory] = useState("all");
+  const [sender, setSender] = useState("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<PostView | null>(null);
   const searchTimer = useRef<NodeJS.Timeout | null>(null);
+  /** The search field is folded away until asked for; the header holds a glass. */
+  const [searching, setSearching] = useState(false);
+  const searchBox = useRef<HTMLInputElement | null>(null);
   /** A post asked for by ?post=<id>, until it has been opened. */
   const wanted = useRef<number | null>(null);
 
   const loadFeed = useCallback(async () => {
     const query = new URLSearchParams({ state: stateFilter, category });
+    if (sender !== "all") query.set("sender", sender);
     if (search.trim()) query.set("q", search.trim());
 
     const response = await fetch(`/api/posts?${query}`);
     if (response.ok) setData((await response.json()) as FeedResponse);
     setLoading(false);
-  }, [stateFilter, category, search]);
+  }, [stateFilter, category, sender, search]);
 
   /**
    * A link to one post, which is how the chat opens a share here rather than
@@ -162,17 +169,37 @@ export default function Feed() {
   // Leaving a post is what marks it read, not opening it: you have seen it once
   // you have moved past it. Glancing at the top of the pile and putting the
   // phone down therefore costs nothing.
+  /**
+   * The post the phone opened by itself at launch.
+   *
+   * Backing out of that one does not count as having read it: you were put
+   * there, you did not go. Swiping past it to the next post does count, and so
+   * does opening it yourself from the list afterwards - both clear this.
+   */
+  const landedOn = useRef<number | null>(null);
+
   const openPreview = (post: PostView) => {
+    landedOn.current = null; // you chose this one
     setSequence(data?.posts ?? []);
     setPreview(post);
   };
 
   const closePreview = () => {
-    if (preview) markRead(preview);
+    const current = showing.current ?? preview;
+    if (current && current.id !== landedOn.current) markRead(current);
+    landedOn.current = null;
     setPreview(null);
   };
 
   const positionOf = (post: PostView) => sequence.findIndex((p) => p.id === post.id);
+
+  /**
+   * The post on screen right now, for anything that needs it outside a render.
+   */
+  const showing = useRef<PostView | null>(null);
+  useEffect(() => {
+    showing.current = preview;
+  }, [preview]);
 
   // On a phone the app opens on the first unread post, full screen, and does
   // so again every time it comes back to the foreground - the list is where
@@ -205,6 +232,7 @@ export default function Feed() {
         setSearch("");
         setData(body);
         setSequence(body.posts);
+        landedOn.current = body.posts[0].id;
         setPreview(body.posts[0]);
       } finally {
         setLaunching(false);
@@ -235,7 +263,8 @@ export default function Feed() {
   const stepTo = (at: number) => {
     const next = sequence[at];
     if (!next) return;
-    if (preview) markRead(preview); // the one being left behind
+    if (preview) markRead(preview); // the one being left behind - swiping past it counts
+    landedOn.current = null;
     // The live copy if it is still there (fresher saved/reacted state), else the snapshot.
     setPreview(data?.posts.find((p) => p.id === next.id) ?? next);
   };
@@ -339,7 +368,7 @@ export default function Feed() {
         <div className="min-w-0">
           <h1 className="font-serif text-[32px] leading-none tracking-tight sm:text-[40px]">Curated</h1>
           <p className="mt-1.5 text-[13.5px] text-muted sm:mt-2 sm:text-[15px]">
-            {headline(data, session)}
+            {headline(data)}
             {watcher?.listening && (
               <span className="ml-2 inline-flex items-center gap-1.5 text-accent">
                 <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
@@ -353,6 +382,22 @@ export default function Feed() {
           <Link href="/chat" aria-label="Chat" title="Chat" className={ICON_BUTTON}>
             <ChatIcon />
           </Link>
+          <button
+            type="button"
+            aria-label="Search"
+            aria-expanded={searching || Boolean(search)}
+            title="Search"
+            onClick={() => {
+              const next = !(searching || search);
+              setSearching(next);
+              if (!next) setSearch("");
+              // Focus after the field exists.
+              if (next) requestAnimationFrame(() => searchBox.current?.focus());
+            }}
+            className={`${ICON_BUTTON} ${searching || search ? "bg-sunk text-ink" : ""}`}
+          >
+            <SearchIcon />
+          </button>
           <HeaderMenu className={ICON_BUTTON} />
         </nav>
       </header>
@@ -414,16 +459,29 @@ export default function Feed() {
             <CategoryMenu value={category} categories={categories} onChange={setCategory} />
           )}
 
-          <label className="ml-auto flex items-center gap-2">
-            <span className="sr-only">Search these posts</span>
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search"
-              className="w-28 rounded-full bg-sunk/70 px-3 py-1.5 text-[13px] placeholder:text-muted focus:bg-sunk focus:outline-none focus:ring-2 focus:ring-accent/60 sm:w-40"
-            />
-          </label>
+          {/* Only worth a control when there is a choice to make. */}
+          {(data?.senders?.length ?? 0) > 1 && (
+            <PersonMenu value={sender} people={data!.senders!} onChange={setSender} />
+          )}
+
+          {(searching || search) && (
+            <label className="ml-auto flex items-center gap-2">
+              <span className="sr-only">Search these posts</span>
+              <input
+                ref={searchBox}
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  setSearch("");
+                  setSearching(false);
+                }}
+                placeholder="Search"
+                className="w-36 rounded-full bg-sunk/70 px-3 py-1.5 text-[13px] placeholder:text-muted focus:bg-sunk focus:outline-none focus:ring-2 focus:ring-accent/60 sm:w-48"
+              />
+            </label>
+          )}
         </div>
       </div>
 
@@ -536,12 +594,11 @@ function EmptyState({
   );
 }
 
-function headline(data: FeedResponse | null, session: SessionInfo | null): string {
+function headline(data: FeedResponse | null): string {
   if (!data) return "Loading";
   const parts: string[] = [];
   parts.push(data.unread === 0 ? "Nothing unread" : `${data.unread} unread`);
   parts.push(`${data.total} in all`);
-  if (session?.username) parts.push(`signed in as ${session.username}`);
   return parts.join(", ");
 }
 

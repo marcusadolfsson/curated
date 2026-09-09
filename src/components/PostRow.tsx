@@ -73,6 +73,19 @@ export default function PostRow({
           with its bottom edge instead of floating wherever the text ends. */}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="sm:pr-10">
+          {/* What they actually said, first. The description is ours and comes
+              second; on a phone this lands directly under the picture. */}
+          {post.messageText && (
+            <div className="mb-2.5 flex max-w-[52ch] items-start gap-2.5">
+              <SenderAvatar post={post} />
+              {/* Square off the corner nearest the face, so the bubble points
+                  at whoever said it - the shape every message app uses. */}
+              <p className="min-w-0 rounded-2xl rounded-tl-md bg-sunk px-3 py-2 font-serif text-[15px] leading-snug text-ink-soft sm:text-[16px]">
+                {post.messageText}
+              </p>
+            </div>
+          )}
+
           {post.summary ? (
             <button
               type="button"
@@ -104,16 +117,6 @@ export default function PostRow({
             </p>
           )}
 
-          {post.messageText && (
-            <div className="mt-3 flex max-w-[52ch] items-start gap-2.5">
-              <SenderAvatar post={post} />
-              {/* Square off the corner nearest the face, so the bubble points
-                  at whoever said it - the shape every message app uses. */}
-              <p className="min-w-0 rounded-2xl rounded-tl-md bg-sunk px-3 py-2 font-serif text-[15px] leading-snug text-ink-soft sm:text-[16px]">
-                {post.messageText}
-              </p>
-            </div>
-          )}
         </div>
 
         <div className="mt-auto flex flex-wrap items-center gap-x-2.5 gap-y-1.5 pt-3 text-[13px] leading-none sm:gap-x-3 sm:pt-4">
@@ -135,11 +138,6 @@ export default function PostRow({
             <span aria-hidden className="mx-1.5 opacity-60">·</span>
             <time>{relativeTime(post.sharedAt)}</time>
           </span>
-          {post.mediaType === "reel" && (
-            <span className="rounded-sm bg-sunk px-1.5 py-[3px] text-[11px] uppercase tracking-wide text-muted">
-              reel
-            </span>
-          )}
           {post.reactedAt && (
             <span className="text-[14px]" title={`Reacted ${relativeTime(post.reactedAt)}`}>
               {post.reactionEmoji}

@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const state = params.get("state") ?? "all";
   const category = params.get("category");
+  const sender = params.get("sender");
   const search = params.get("q")?.trim();
 
   // Two sets: what limits the list, and what the category counts are measured
@@ -44,6 +45,11 @@ export async function GET(request: NextRequest) {
   } else if (category && category !== "all") {
     filters.push(eq(posts.category, category));
   }
+  // Who sent it, when you follow more than one person. Filtered like the
+  // category rather than scoped like the state, so the people list keeps
+  // showing everyone while one of them is selected.
+  if (sender && sender !== "all") filters.push(eq(posts.senderUsername, sender));
+
   if (search) {
     const term = `%${search}%`;
     const match = or(
@@ -65,7 +71,11 @@ export async function GET(request: NextRequest) {
 
   // Category counts within the current view.
   const inScope = await db
-    .select({ category: posts.category })
+    .select({
+      category: posts.category,
+      senderUsername: posts.senderUsername,
+      senderAvatarFile: posts.senderAvatarFile,
+    })
     .from(posts)
     .where(scope.length > 0 ? and(...scope) : undefined);
 
@@ -86,8 +96,25 @@ export async function GET(request: NextRequest) {
         : undefined,
     );
 
+  // Everyone who has sent something in this view, most first. The avatar is
+  // whichever of their posts carries one, so a person has a face in the filter
+  // for the same reason they have one in the row.
+  const senderCounts = new Map<string, { username: string; avatar: string | null; count: number }>();
+  for (const row of inScope) {
+    const username = row.senderUsername;
+    if (!username) continue;
+    const seen = senderCounts.get(username) ?? { username, avatar: null, count: 0 };
+    seen.count += 1;
+    if (!seen.avatar && row.senderAvatarFile) seen.avatar = `/api/media/${row.senderAvatarFile}`;
+    senderCounts.set(username, seen);
+  }
+  const senders = [...senderCounts.values()].sort(
+    (a, b) => b.count - a.count || a.username.localeCompare(b.username),
+  );
+
   return NextResponse.json({
     posts: rows.map(toPostView),
+    senders,
     total: everything.length,
     unread: everything.filter((row) => !row.viewed).length,
     saved: everything.filter((row) => row.saved).length,

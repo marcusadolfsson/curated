@@ -74,3 +74,22 @@ export function GearIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function SearchIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      aria-hidden
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="M20 20l-3.6-3.6" />
+    </svg>
+  );
+}

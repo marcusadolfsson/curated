@@ -45,12 +45,19 @@ type Conversation = {
 const SAFETY_NET_MS = 45_000;
 const WATCHER_POLL_MS = 3_000;
 
-type Followed = { threadId: string; title: string | null; participants: string[] };
+type Followed = {
+  threadId: string;
+  title: string | null;
+  participants: string[];
+  avatar: string | null;
+};
 
 export default function Chat() {
   const [chat, setChat] = useState<Conversation | null>(null);
   /** The conversations you follow, so more than one can be talked to. */
   const [followed, setFollowed] = useState<Followed[]>([]);
+  const [picking, setPicking] = useState(false);
+  const picker = useRef<HTMLDivElement>(null);
   /**
    * Which one is open. Held in the URL as well as in state, so a reload or a
    * shared link comes back to the same conversation rather than to whichever
@@ -63,6 +70,22 @@ export default function Chat() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const chosen = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!picking) return;
+    const away = (event: PointerEvent) => {
+      if (!picker.current?.contains(event.target as Node)) setPicking(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPicking(false);
+    };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [picking]);
   const bottom = useRef<HTMLDivElement>(null);
   const lastEvent = useRef<string | null>(null);
   const inFlight = useRef(false);
@@ -276,20 +299,51 @@ export default function Chat() {
         {/* One conversation is a heading. Several is a choice, and it belongs
             where the heading was rather than tucked away in a menu. */}
         {followed.length > 1 ? (
-          <label className="min-w-0 flex-1">
-            <span className="sr-only">Which conversation</span>
-            <select
-              value={threadId ?? ""}
-              onChange={(event) => openThread(event.target.value)}
-              className="-ml-1 w-full max-w-full cursor-pointer truncate rounded-sm bg-transparent px-1 font-serif text-2xl leading-none tracking-tight text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+          <div ref={picker} className="relative min-w-0 flex-1">
+            <button
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={picking}
+              onClick={() => setPicking((state) => !state)}
+              className="flex min-w-0 max-w-full items-center gap-2"
             >
-              {followed.map((thread) => (
-                <option key={thread.threadId} value={thread.threadId}>
-                  {thread.title ?? thread.participants.join(", ") ?? "Conversation"}
-                </option>
-              ))}
-            </select>
-          </label>
+              <Face thread={followed.find((t) => t.threadId === threadId)} size={30} />
+              <span className="min-w-0 truncate font-serif text-2xl leading-none tracking-tight">
+                {chat?.title ?? "Chat"}
+              </span>
+              <svg width="12" height="7" viewBox="0 0 12 7" aria-hidden className="shrink-0 opacity-60">
+                <path d="M1 1l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </button>
+
+            {picking && (
+              <div
+                role="listbox"
+                className="absolute top-full left-0 z-20 mt-2 max-h-72 w-64 overflow-y-auto rounded-xl bg-surface p-1.5 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.25)] ring-1 ring-line"
+              >
+                {followed.map((thread) => (
+                  <button
+                    key={thread.threadId}
+                    type="button"
+                    role="option"
+                    aria-selected={thread.threadId === threadId}
+                    onClick={() => {
+                      setPicking(false);
+                      openThread(thread.threadId);
+                    }}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-sunk ${
+                      thread.threadId === threadId ? "bg-sunk text-ink" : "text-ink-soft"
+                    }`}
+                  >
+                    <Face thread={thread} size={28} />
+                    <span className="min-w-0 flex-1 truncate text-[15px]">
+                      {thread.title ?? thread.participants.join(", ") ?? "Conversation"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ) : (
           <h1 className="min-w-0 truncate font-serif text-2xl leading-none tracking-tight">
             {chat?.title ?? "Chat"}
@@ -347,7 +401,7 @@ export default function Chat() {
       </div>
 
       <form
-        className="flex shrink-0 items-end gap-2 border-t border-line pt-2.5 pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+        className="flex shrink-0 items-stretch gap-2 border-t border-line pt-2.5 pb-[max(env(safe-area-inset-bottom),0.75rem)]"
         onSubmit={(event) => {
           event.preventDefault();
           void send();
@@ -367,17 +421,42 @@ export default function Chat() {
             rows={1}
             maxLength={1000}
             placeholder="Write a message"
-            className="w-full resize-none rounded-2xl border border-line bg-surface px-3.5 py-2.5 font-serif text-[17px] text-ink placeholder:text-muted focus:border-accent focus:outline-none"
+            className="block w-full resize-none rounded-2xl border border-line bg-surface px-3.5 py-2.5 font-serif text-[17px] text-ink placeholder:text-muted focus:border-accent focus:outline-none"
           />
         </label>
         <button
           type="submit"
           disabled={!draft.trim() || sending}
-          className="shrink-0 rounded-full bg-accent px-4 py-2.5 text-[15px] text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="flex shrink-0 items-center rounded-full bg-accent px-4 text-[15px] text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           {sending ? "Sending" : "Send"}
         </button>
       </form>
     </div>
+  );
+}
+
+/** A conversation's face, or its initial when we have never seen one. */
+function Face({ thread, size }: { thread: { title: string | null; avatar: string | null } | undefined; size: number }) {
+  const style = { width: size, height: size };
+  if (thread?.avatar) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={thread.avatar}
+        alt=""
+        style={style}
+        className="shrink-0 rounded-full object-cover ring-1 ring-black/[0.08] dark:ring-white/[0.10]"
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      style={style}
+      className="flex shrink-0 items-center justify-center rounded-full bg-sunk text-[11px] font-medium text-muted"
+    >
+      {thread?.title ? thread.title[0]!.toUpperCase() : "?"}
+    </span>
   );
 }

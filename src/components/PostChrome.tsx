@@ -47,6 +47,41 @@ type Props = {
   onSheetOffset?: (pixels: number, animated: boolean) => void;
 };
 
+/**
+ * Whoever sent it, over the picture. Their face where we have one, their
+ * initial where we do not - the same rule the feed row uses, so a person
+ * looks like the same person in both places.
+ */
+function SenderMark({
+  post,
+  name,
+  size = "sm",
+}: {
+  post: PostView;
+  name: string;
+  size?: "sm" | "md";
+}) {
+  const box = size === "md" ? "h-6 w-6" : "h-5 w-5";
+  if (post.senderAvatar) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={post.senderAvatar}
+        alt=""
+        className={`${box} shrink-0 rounded-full object-cover ring-1 ring-white/25`}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className={`${box} flex shrink-0 items-center justify-center rounded-full bg-white/25 text-[10px] font-medium text-white`}
+    >
+      {name ? name[0]!.toUpperCase() : "?"}
+    </span>
+  );
+}
+
 export default function PostChrome({
   post,
   variant,
@@ -445,13 +480,11 @@ export default function PostChrome({
           className="pointer-events-auto flex w-full items-center gap-2 px-4 pb-2.5 text-left"
           aria-label="Show the details"
         >
+          {/* Who sent it, always - more than one person can be sending. Their
+              face says it faster than their name, and leaves the line to what
+              they actually wrote. */}
+          <SenderMark post={post} name={senderName} />
           <span className="min-w-0 flex-1 truncate text-[15px]">
-            {/* Who sent it, always - more than one person can be sending. When
-                they wrote something the quotes mark it as theirs rather than
-                the app's; otherwise the name simply says who this came from. */}
-            <span className="mr-1.5 rounded-full bg-white/25 px-1.5 py-[1px] align-middle text-[11px] font-medium text-white">
-              {senderName}
-            </span>
             {post.messageText ? (
               <span className="font-serif italic text-white">&ldquo;{post.messageText}&rdquo;</span>
             ) : (
@@ -561,10 +594,12 @@ export default function PostChrome({
             <p className="mt-2 text-[13px] leading-relaxed text-white/40">{post.items.join("  ·  ")}</p>
           )}
           {post.messageText && (
-            <p className="mt-4 rounded-xl bg-white/[0.07] px-3 py-2.5 text-[14px] leading-relaxed text-white/90">
-              <span className="mr-1.5 text-[12px] text-white/45">{senderName}</span>
-              {post.messageText}
-            </p>
+            <div className="mt-4 flex items-start gap-2.5">
+              <SenderMark post={post} name={senderName} size="md" />
+              <p className="min-w-0 flex-1 rounded-2xl rounded-tl-md bg-white/[0.07] px-3 py-2.5 text-[14px] leading-relaxed text-white/90">
+                {post.messageText}
+              </p>
+            </div>
           )}
           {replied && (
             <p className="mt-2 rounded-xl bg-accent/25 px-3 py-2.5 text-[14px] leading-relaxed text-white/90">

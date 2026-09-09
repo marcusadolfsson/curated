@@ -1,16 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { threads } from "@/db/schema";
+import { posts, threads } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const rows = await db.select().from(threads).orderBy(desc(threads.lastItemAt));
+
+  // A face per conversation, taken from the newest post in it that carries
+  // one. The threads table has no avatar of its own, and this is the same
+  // picture the feed and the modal already show for that person.
+  const faces = new Map<string, string>();
+  const seen = await db
+    .select({ threadId: posts.threadId, avatar: posts.senderAvatarFile })
+    .from(posts)
+    .orderBy(desc(posts.sharedAt));
+  for (const row of seen) {
+    if (!row.threadId || !row.avatar || faces.has(row.threadId)) continue;
+    faces.set(row.threadId, `/api/media/${row.avatar}`);
+  }
+
   return NextResponse.json({
     threads: rows.map((thread) => ({
       threadId: thread.threadId,
       title: thread.title,
+      avatar: faces.get(thread.threadId) ?? null,
       participants: parseParticipants(thread.participants),
       watch: thread.watch,
       lastItemAt: thread.lastItemAt?.toISOString() ?? null,
