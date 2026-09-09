@@ -51,6 +51,8 @@ export default function Feed() {
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState<PostView | null>(null);
   const searchTimer = useRef<NodeJS.Timeout | null>(null);
+  /** A post asked for by ?post=<id>, until it has been opened. */
+  const wanted = useRef<number | null>(null);
 
   const loadFeed = useCallback(async () => {
     const query = new URLSearchParams({ state: stateFilter, category });
@@ -60,6 +62,37 @@ export default function Feed() {
     if (response.ok) setData((await response.json()) as FeedResponse);
     setLoading(false);
   }, [stateFilter, category, search]);
+
+  /**
+   * A link to one post, which is how the chat opens a share here rather than
+   * sending you to Instagram. The whole pile is loaded rather than the current
+   * filter, because the post being linked to is usually one you have already
+   * read and the default view is unread.
+   */
+  useEffect(() => {
+    const asked = Number(new URLSearchParams(window.location.search).get("post"));
+    if (!Number.isFinite(asked) || asked <= 0) return;
+    wanted.current = asked;
+    setStateFilter("all");
+    setCategory("all");
+    // Leave the address bar clean, so a reload does not reopen it forever.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("post");
+    window.history.replaceState(null, "", url);
+  }, []);
+
+  // Once the pile holding it has arrived, open it.
+  useEffect(() => {
+    if (wanted.current === null || !data) return;
+    const post = data.posts.find((p) => p.id === wanted.current);
+    if (!post) {
+      wanted.current = null; // not in the feed at all: leave the list alone
+      return;
+    }
+    wanted.current = null;
+    setSequence(data.posts);
+    setPreview(post);
+  }, [data]);
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -157,6 +190,11 @@ export default function Feed() {
     }
 
     const openUnread = async () => {
+      // Asked for a particular post: that wins over the newest unread.
+      if (wanted.current !== null) {
+        setLaunching(false);
+        return;
+      }
       try {
         const response = await fetch("/api/posts?state=unread&category=all");
         if (!response.ok) return;

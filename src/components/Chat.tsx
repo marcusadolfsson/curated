@@ -190,48 +190,74 @@ export default function Chat() {
     }
   };
 
+  /**
+   * A share: the picture at a size you can actually read, with whatever was
+   * typed sitting over its foot rather than beside it. The post opens here
+   * rather than on Instagram - going to Instagram to look at a thing someone
+   * sent you is the whole problem this app exists to avoid.
+   */
   const SharePreview = ({ message, mine }: { message: Message; mine: boolean }) => {
-    const href = `https://www.instagram.com/p/${message.shortcode}/`;
     const isVideo = message.post?.mediaType === "reel" || message.post?.mediaType === "tv";
+    const here = message.post ? `/?post=${message.post.id}` : null;
 
     // Nothing kept for this one - it predates the sync, or was never imported.
-    // Say what it was rather than showing an empty frame.
+    // Say what it was, and let it go to Instagram since we have no copy.
     if (!message.post?.thumbnail) {
       return (
-        <Link
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          className={`line-clamp-2 text-[15px] underline-offset-4 hover:underline ${
-            mine ? "text-paper/80" : "text-muted"
+        <div
+          className={`rounded-2xl px-3.5 py-2 font-serif text-[17px] leading-snug ${
+            mine ? "bg-accent text-paper" : "bg-surface text-ink"
           }`}
         >
-          {message.post?.summary ?? "Shared a post"}
-        </Link>
+          <Link
+            href={`https://www.instagram.com/p/${message.shortcode}/`}
+            target="_blank"
+            rel="noreferrer noopener"
+            className={`line-clamp-2 text-[15px] underline-offset-4 hover:underline ${
+              mine ? "text-paper/80" : "text-muted"
+            }`}
+          >
+            {message.post?.summary ?? "Shared a post"}
+          </Link>
+          {message.text}
+        </div>
       );
     }
 
     return (
-      <Link
-        href={href}
-        target="_blank"
-        rel="noreferrer noopener"
-        aria-label={message.post.summary ?? "Open this post on Instagram"}
-        className="relative block aspect-[4/5] w-14 shrink-0 overflow-hidden rounded-lg bg-sunk ring-1 ring-black/[0.08] dark:ring-white/[0.10]"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={message.post.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
-        {isVideo && (
-          <span
-            aria-hidden
-            className="absolute bottom-1 left-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/20"
+      // Room at the foot for the pill that hangs past the picture.
+      <div className={`relative w-[168px] ${message.text ? "pb-5" : ""} ${mine ? "ml-auto" : ""}`}>
+        <Link
+          href={here!}
+          aria-label={message.post.summary ?? "Open this post"}
+          className="relative block aspect-[4/5] w-full overflow-hidden rounded-xl bg-sunk ring-1 ring-black/[0.08] dark:ring-white/[0.10]"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={message.post.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover" />
+          {isVideo && (
+            <span
+              aria-hidden
+              className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/20 backdrop-blur-sm"
+            >
+              <svg viewBox="0 0 10 12" className="ml-[1px] h-3 w-3 fill-white">
+                <path d="M0 0l10 6-10 6z" />
+              </svg>
+            </span>
+          )}
+        </Link>
+
+        {message.text && (
+          <p
+            className={`absolute bottom-0 w-max max-w-[190px] rounded-2xl px-3 py-1.5 font-serif text-[15px] leading-snug shadow-[0_6px_18px_-6px_rgba(0,0,0,0.45)] ${
+              mine
+                ? "right-3 rounded-br-md bg-accent text-paper"
+                : "left-3 rounded-bl-md bg-surface text-ink ring-1 ring-line"
+            }`}
           >
-            <svg viewBox="0 0 10 12" className="ml-[1px] h-2.5 w-2.5 fill-white">
-              <path d="M0 0l10 6-10 6z" />
-            </svg>
-          </span>
+            {message.text}
+          </p>
         )}
-      </Link>
+      </div>
     );
   };
 
@@ -293,24 +319,17 @@ export default function Chat() {
                     {!mine && (
                       <p className="mb-0.5 pl-3 text-[13px] text-muted">{nameOf(message.senderId)}</p>
                     )}
-                    <div
-                      className={`rounded-2xl px-3.5 py-2 font-serif text-[17px] leading-snug ${
-                        mine ? "bg-accent text-paper" : "bg-surface text-ink"
-                      }`}
-                    >
-                      {message.shortcode ? (
-                        // A share is the picture and whatever was said about
-                        // it, side by side. It used to be two lines describing
-                        // the post, which is the one thing a thumbnail says
-                        // better than a sentence.
-                        <div className="flex items-start gap-2.5">
-                          <SharePreview message={message} mine={mine} />
-                          {message.text && <span className="min-w-0">{message.text}</span>}
-                        </div>
-                      ) : (
-                        message.text
-                      )}
-                    </div>
+                    {message.shortcode ? (
+                      <SharePreview message={message} mine={mine} />
+                    ) : (
+                      <div
+                        className={`rounded-2xl px-3.5 py-2 font-serif text-[17px] leading-snug ${
+                          mine ? "bg-accent text-paper" : "bg-surface text-ink"
+                        }`}
+                      >
+                        {message.text}
+                      </div>
+                    )}
                     <p
                       className={`mt-0.5 text-[12px] text-muted ${mine ? "pr-3 text-right" : "pl-3"}`}
                     >
