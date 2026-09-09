@@ -29,9 +29,9 @@ A reel plays full screen, in the app, with the reactions along the bottom and
 the sender's message over the foot of it. A swipe up is the next thing they
 sent rather than whatever Instagram would rather show you.
 
-Every post, sender and thumbnail above is invented, and the pictures are
-placeholders. Screenshots of the real thing would be someone's private
-messages.
+Every post, sender and message above is invented, and the photographs are
+generated. Screenshots of the real thing would be someone's private messages
+and a wall of other people's pictures.
 
 ## Why it exists
 
