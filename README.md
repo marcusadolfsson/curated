@@ -1,11 +1,12 @@
 # Curated
 
-A private feed of the Instagram posts someone sends you in DMs, with each one
-read and summarised so you can tell at a glance what it is — and reacted to in
-the thread, so they know it landed.
+**Everything the people you love send you on Instagram, in one place you can
+actually get through.**
 
-Built for one person and one conversation: someone sends you reels faster than
-you watch them, and Instagram is built to pull you off the one you opened.
+Your partner sends reels. Your friends send recipes, flats, jokes, things you
+said you would look at. It piles up in a DM list you have to fight your way
+back into every time, inside an app built to send you somewhere else. Curated
+is that pile on its own, with nothing else in it.
 
 ## What it looks like
 
@@ -32,6 +33,33 @@ sent rather than whatever Instagram would rather show you.
 Every post, sender and message above is invented, and the photographs are
 generated. Screenshots of the real thing would be someone's private messages
 and a wall of other people's pictures.
+
+## What it does
+
+**1. Your pile, not a feed.** Every post and reel anyone has sent you, newest
+first, unread on top. Swipe up and you get the next thing *they* sent, not
+whatever the algorithm would rather you watched. Nothing else is in here: no
+explore, no suggestions, no drift.
+
+**2. React and reply without losing your place.** The reactions sit under your
+thumb while the reel is still playing, and what you pick goes back into the
+real thread, so they know it landed. No backing out to the message, pressing
+it, choosing, and then hunting for where you were.
+
+**3. Every post read and sorted for you.** Claude looks at the picture and the
+caption and writes a line saying what it actually is, files it under a
+category, and names the things in it. A hundred anonymous thumbnails become a
+list you can scan in a few seconds — and search.
+
+**4. Save the ones worth coming back to.** The recipe you meant to cook, the
+paint colour, the place. Kept in one list instead of scrolled past and lost.
+
+**5. The conversation, live.** Reply to a post in the thread, or open the chat
+and talk properly. It reads the thread the moment it stirs, so a real
+back-and-forth works without opening Instagram at all.
+
+Read and unread are the spine of the whole thing, so the pile empties instead
+of growing.
 
 ## Why it exists
 
@@ -63,7 +91,7 @@ Here the pile is the interface. A swipe moves to the next thing they sent. The
 reactions are under your thumb while you are watching. Read and unread are the
 spine of the whole thing, so the pile empties instead of accumulating.
 
-## What it does
+## What happens to a post
 
 1. Signs in to Instagram with a real browser and keeps the session on disk.
 2. Reads your DMs and pulls out every post and reel shared with you.
@@ -72,11 +100,6 @@ spine of the whole thing, so the pile empties instead of accumulating.
    writes a short description, a category, the concrete things it names, and the
    emoji it deserves.
 5. Reacts to the message in the thread with that emoji.
-
-Everything is listed newest first with a coloured spine per category, so the
-left edge of the page becomes an index you can scan. Unread posts sit on a
-lighter ground; reading one recedes it without moving it. Save keeps the ones
-worth returning to.
 
 ## How it works, and why
 
