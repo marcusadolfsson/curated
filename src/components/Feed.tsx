@@ -4,9 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import PostRow from "./PostRow";
 import PostPreview from "./PostPreview";
-import CategoryMenu from "./CategoryMenu";
 import HeaderMenu from "./HeaderMenu";
-import PersonMenu, { type Person } from "./PersonMenu";
+import FilterMenu, { type Person } from "./FilterMenu";
 import { ChatIcon, SearchIcon } from "./icons";
 import type { PostView } from "@/lib/serialize";
 import type { SyncState } from "@/lib/sync";
@@ -513,13 +512,17 @@ export default function Feed() {
 
           <span aria-hidden className="mx-1.5 hidden h-4 w-px bg-line sm:block" />
 
-          {describing && (
-            <CategoryMenu value={category} categories={categories} onChange={setCategory} />
-          )}
-
-          {/* Only worth a control when there is a choice to make. */}
-          {(data?.senders?.length ?? 0) > 1 && (
-            <PersonMenu value={sender} people={data!.senders!} onChange={setSender} />
+          {/* One menu: what kind, and who from. Either half appears only when
+              there is a choice inside it. */}
+          {(describing || (data?.senders?.length ?? 0) > 1) && (
+            <FilterMenu
+              category={category}
+              categories={describing ? categories : []}
+              onCategory={setCategory}
+              sender={sender}
+              people={data?.senders ?? []}
+              onSender={setSender}
+            />
           )}
 
           {(searching || search) && (
