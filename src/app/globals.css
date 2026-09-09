@@ -14,19 +14,31 @@
   --spine-chroma: 0.13;
 }
 
+/* Dark is black, not a dark green. The light theme is warm paper and that is
+   its character; at night the same warmth reads as a green cast behind
+   photographs, and photographs are the point. Neutral greys let the pictures
+   carry the only colour on the page - along with the accent and the category
+   rail, which stay exactly as they are.
+
+   True black rather than a charcoal: this is used on a phone in the evening,
+   where an OLED panel turns #000 into an actual switched-off pixel, and the
+   full-width pictures sit on nothing at all. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #16180f;
-    --surface: #1e2118;
-    --surface-sunk: #191c14;
-    --ink: #e8e9df;
-    --ink-soft: #c2c5b7;
-    --muted: #8b9083;
-    --line: #2f332a;
+    --paper: #000000;
+    --surface: #121215;
+    --surface-sunk: #1e1e22;
+    --ink: #eeeef0;
+    --ink-soft: #b6b6bc;
+    --muted: #83838c;
+    --line: #27272c;
     --accent: #7fc0aa;
     --danger: #e08c78;
-    --spine-lightness: 0.72;
-    --spine-chroma: 0.12;
+    /* Lighter than daylight so it reads on black, but less saturated with
+       it: hold the chroma up as the lightness rises and a muted brick turns
+       into hot pink. This is the same rail, at night. */
+    --spine-lightness: 0.70;
+    --spine-chroma: 0.105;
   }
 }
 
@@ -45,7 +57,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --heat-0: #1a1d16;
+    --heat-0: #141416;
     --heat-1: #20302a;
     --heat-2: #27453b;
     --heat-3: #2f6152;
