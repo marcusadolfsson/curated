@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CATEGORY_HUE, isCategory } from "@/lib/categories";
+import { FilterIcon } from "./icons";
 
 export type Person = { username: string; avatar: string | null; count: number };
 
@@ -21,6 +22,7 @@ export default function FilterMenu({
   sender,
   people,
   onSender,
+  className = "",
 }: {
   category: string;
   /** Topic and how many posts carry it, in the order to show. */
@@ -29,6 +31,7 @@ export default function FilterMenu({
   sender: string;
   people: Person[];
   onSender: (value: string) => void;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -57,23 +60,33 @@ export default function FilterMenu({
   const total = categories.reduce((sum, [, count]) => sum + (count ?? 0), 0);
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className={`relative ${className}`}>
+      {/* One width, whatever is chosen. The label used to be whatever you had
+          picked, so the whole filter bar shifted as you used it - and on a
+          phone a person's handle pushed the row onto two lines. The word stays
+          put and the marks carry the state. */}
       <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={
+          anyCategory && anySender
+            ? "Filter"
+            : `Filter: ${[anyCategory ? null : category, anySender ? null : sender].filter(Boolean).join(", ")}`
+        }
         onClick={() => setOpen((state) => !state)}
         className={`flex items-center gap-1.5 rounded-full py-1 text-[13px] transition-colors ${
           anyCategory && anySender ? "text-muted hover:text-ink" : "text-ink"
         }`}
       >
-        {!anyCategory && <span aria-hidden style={hue(category)} className="dot h-2 w-2 shrink-0 rounded-full" />}
-        {!anySender && who && <Face person={who} size={17} />}
-        <span className="truncate">
-          {anyCategory && anySender
-            ? "Anything"
-            : [anyCategory ? null : category, anySender ? null : sender].filter(Boolean).join(" · ")}
+        <span className="flex w-[26px] shrink-0 items-center justify-center gap-1">
+          {anyCategory && anySender && <FilterIcon className="opacity-70" />}
+          {!anySender && who && <Face person={who} size={16} />}
+          {!anyCategory && (
+            <span aria-hidden style={hue(category)} className="dot h-2 w-2 shrink-0 rounded-full" />
+          )}
         </span>
+        <span>Filter</span>
         <svg
           width="10"
           height="6"

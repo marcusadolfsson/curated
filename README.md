@@ -10,29 +10,29 @@ is that pile on its own, with nothing else in it.
 
 ## What it looks like
 
-The pile, newest first, with a colour down the left edge per category. Reading a
-post recedes it without moving it, so the list empties from the top rather than
-reshuffling under you.
-
-![The feed](docs/feed.png)
-
-On a phone it is the same list, and a post opens full screen with the reactions
-under your thumb. The card carries what the model made of it: a description, the
-concrete things it names, and whatever the sender typed alongside the share.
+It is built for a phone, because that is where the things people send you
+arrive. The pile, a post full screen, its card pulled up, and the conversation:
 
 <p align="center">
-  <img src="docs/feed-phone.png" alt="The feed on a phone" width="240">
-  <img src="docs/reel-phone.png" alt="A reel playing full screen" width="240">
-  <img src="docs/details-phone.png" alt="A post, with its details open" width="240">
+  <img src="docs/phone-index.png" alt="The pile of unread posts" width="215">
+  <img src="docs/phone-post.png" alt="A reel playing full screen" width="215">
+  <img src="docs/phone-card.png" alt="The same post with its details card up" width="215">
+  <img src="docs/phone-chat.png" alt="The conversation, with shared posts as pictures" width="215">
 </p>
 
-A reel plays full screen, in the app, with the reactions along the bottom and
-the sender's message over the foot of it. A swipe up is the next thing they
-sent rather than whatever Instagram would rather show you.
+A swipe up is the next thing they sent. The reactions are under your thumb
+while it plays. Pull the card up for what the model made of it, and reply
+without leaving. In the conversation a share is the picture itself, and it
+opens here rather than in Instagram.
 
-Every post, sender and message above is invented, and the photographs are
-generated. Screenshots of the real thing would be someone's private messages
-and a wall of other people's pictures.
+The same list on a desktop, with a colour down the left edge per category:
+
+![The feed on a desktop](docs/desktop.png)
+
+Every post, sender and message above is invented and the photographs are
+generated, but the descriptions are not: they are what the app itself wrote
+about these pictures. Screenshots of the real thing would be someone's private
+messages.
 
 ## What it does
 

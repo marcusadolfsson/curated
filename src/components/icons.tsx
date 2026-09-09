@@ -93,3 +93,21 @@ export function SearchIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function FilterIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      aria-hidden
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M4 7h16M7 12h10M10 17h4" />
+    </svg>
+  );
+}
