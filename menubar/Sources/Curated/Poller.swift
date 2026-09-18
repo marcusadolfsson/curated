@@ -270,6 +270,8 @@ final class Poller {
             lines.append("Posts:    \(counts.unread) unread of \(counts.total), \(counts.saved) saved")
         }
         switch snapshot.site {
+        case .reachable(let status) where (200..<300).contains(status):
+            lines.append("Public:   \(config.publicURL.host() ?? "") OPEN - no Access login (HTTP \(status))")
         case .reachable(let status):
             lines.append("Public:   \(config.publicURL.host() ?? "") answering (HTTP \(status))")
         case .unreachable(let why):

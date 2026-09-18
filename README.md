@@ -178,7 +178,7 @@ It is one app.
 cd menubar && make install-standalone
 ```
 
-That builds **Curated.app** - about 390 MB - and puts it in `~/Applications`.
+That builds **Curated.app** - about 390 MB - and puts it in `/Applications`.
 Open it once and it offers to start at login. It carries its own Node and its
 own built server and runs them as a child process, so there is no Homebrew, no
 checkout to keep, no plist to edit and no `sudo`. Everything after that is in
@@ -334,7 +334,7 @@ Start with the menu bar icon: monochrome means healthy, and the panel says what
 is wrong when it is not. The same answer without a screen:
 
 ```bash
-~/Applications/Curated.app/Contents/MacOS/Curated --report
+/Applications/Curated.app/Contents/MacOS/Curated --report
 ```
 
 Then, for detail:

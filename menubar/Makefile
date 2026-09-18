@@ -2,7 +2,7 @@ APP      := Curated
 BUNDLE   := $(APP).app
 CONFIG   := release
 BIN      := .build/$(CONFIG)/$(APP)
-INSTALL  := $(HOME)/Applications
+INSTALL  := /Applications
 AGENT    := com.curated.app
 PLIST    := $(HOME)/Library/LaunchAgents/$(AGENT).plist
 

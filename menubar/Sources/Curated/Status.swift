@@ -212,6 +212,23 @@ extension Snapshot {
             found.append(Concern(health: .degraded, text: "Public address unreachable: \(why)"))
         }
 
+        // The worst thing this check can find, and it used to show it as green.
+        //
+        // Curated has no login of its own; Cloudflare Access is its only lock,
+        // and an unauthenticated request to a protected hostname is answered by
+        // Access's redirect to its login page. A success instead means the app
+        // itself answered a stranger - the feed, the conversation, and replies
+        // sent from the account, open to anyone with the URL. That happened
+        // when the hostname changed: Access policies attach to a hostname, the
+        // tunnel route moved and the policy did not, and this row read
+        // "answering" for a day.
+        if case .reachable(let status) = site, (200..<300).contains(status) {
+            found.append(Concern(
+                health: .attention,
+                text: "Public address is open without Cloudflare Access - anyone with the URL can use it."
+            ))
+        }
+
         return found.sorted { $0.health > $1.health }
     }
 
