@@ -28,7 +28,7 @@ keeps the whole thing editable and buildable from a terminal.
 
 **Installing does not replace what is already running.** `open` on an app that
 is running activates it rather than launching the new copy, so the new binary
-sits in `~/Applications` while the old one carries on and the change appears to
+sits in `/Applications` while the old one carries on and the change appears to
 have done nothing. Quit it first:
 
 ```bash

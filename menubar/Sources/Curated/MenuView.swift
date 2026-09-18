@@ -146,7 +146,12 @@ struct MenuView: View {
         Section(title: "Access") {
             switch snapshot.site {
             case .reachable(let status):
-                Row("Public", value: publicDescription(status), tone: .good)
+                // A success here is the app answering a stranger, not health.
+                Row(
+                    "Public",
+                    value: publicDescription(status),
+                    tone: (200..<300).contains(status) ? .bad : .good
+                )
             case .unreachable(let why):
                 Row("Public", value: why, tone: .bad)
             case .notChecked:
@@ -167,7 +172,7 @@ struct MenuView: View {
     /// rather than showing a bare status code that looks like a fault.
     private func publicDescription(_ status: Int) -> String {
         switch status {
-        case 200: return "answering"
+        case 200..<300: return "OPEN - no Access login in front"
         case 301, 302, 303, 307, 308: return "answering · Access login"
         default: return "answering · HTTP \(status)"
         }
