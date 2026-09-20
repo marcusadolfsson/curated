@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { posts, syncRuns, threads, type Post } from "@/db/schema";
 import {
   RateLimitedError,
+  ScrapingWarningError,
   SessionExpiredError,
   getSessionStatus,
   isSessionKnownDead,
@@ -94,7 +95,12 @@ export function startSync(): SyncState {
 
   void runSync().catch(async (error) => {
     // Instagram pushing back stops the automation rather than retrying it.
-    if (error instanceof RateLimitedError) {
+    if (error instanceof ScrapingWarningError) {
+      await pauseAutomation(
+        "Instagram served a scraping warning, so everything stopped. Lift this by hand.",
+        48,
+      );
+    } else if (error instanceof RateLimitedError) {
       await pauseAutomation(
         "Instagram rate-limited this host, so syncing stopped rather than pressing on.",
       );
@@ -289,7 +295,11 @@ async function runSync() {
         console.warn(`[sync] ${threadId}: stopped short of ${since.toISOString()}; will resume next time`);
       }
     } catch (error) {
-      if (error instanceof SessionExpiredError || error instanceof RateLimitedError) throw error;
+      if (
+        error instanceof SessionExpiredError ||
+        error instanceof RateLimitedError ||
+        error instanceof ScrapingWarningError
+      ) throw error;
       console.error(`[sync] thread ${threadId} failed:`, error);
     }
 
@@ -342,7 +352,11 @@ async function prefetchVideos(postIds: number[]) {
       const video = await fetchVideo(post.shortcode, mediaId);
       if (video) await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
     } catch (error) {
-      if (error instanceof SessionExpiredError || error instanceof RateLimitedError) throw error;
+      if (
+        error instanceof SessionExpiredError ||
+        error instanceof RateLimitedError ||
+        error instanceof ScrapingWarningError
+      ) throw error;
       console.error(`[sync] could not fetch the reel for ${post.shortcode}:`, error);
     }
   }
