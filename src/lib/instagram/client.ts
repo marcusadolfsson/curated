@@ -2,10 +2,10 @@ import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { PROFILE_DIR, STORAGE_STATE_PATH, ensureDirs } from "@/lib/paths";
 import { asBool, getSetting, setSettings } from "@/lib/settings";
-import { RateLimitedError, SessionExpiredError } from "./errors";
+import { RateLimitedError, ScrapingWarningError, SessionExpiredError } from "./errors";
 import { closeInboxTab, igJson, inboxTab } from "./tab";
 
-export { RateLimitedError, SessionExpiredError };
+export { RateLimitedError, ScrapingWarningError, SessionExpiredError };
 
 /**
  * The browser that is signed in to Instagram.

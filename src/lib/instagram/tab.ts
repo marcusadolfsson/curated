@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { getContext, markSessionDead, markSessionVerified } from "./client";
-import { RateLimitedError, SessionExpiredError } from "./errors";
+import { RateLimitedError, ScrapingWarningError, SessionExpiredError } from "./errors";
 
 /**
  * The one Instagram tab.
@@ -131,6 +131,17 @@ async function load(existing: Page | null): Promise<Page> {
     throw new RateLimitedError("Instagram answered 429 for the inbox page");
   }
   const landed = page.url();
+
+  // Checked before anything else, because this page is also a redirect away
+  // from the inbox and would otherwise be filed as an ordinary fault and
+  // retried on a timer - which is what happened, and is the opposite of what
+  // it asks for.
+  if (landed.includes("/accounts/scraping_warning")) {
+    await closeInboxTab();
+    markSessionDead();
+    throw new ScrapingWarningError(landed);
+  }
+
   if (turnedAway(landed)) {
     await closeInboxTab();
     markSessionDead();

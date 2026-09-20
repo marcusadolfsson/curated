@@ -1,6 +1,7 @@
 import type { Page, WebSocket } from "playwright";
 import {
   RateLimitedError,
+  ScrapingWarningError,
   SessionExpiredError,
   holdBrowserOpen,
   isSessionKnownDead,
@@ -47,8 +48,17 @@ const KEEPALIVE_MAX_BYTES = 16; // MQTT PINGRESP and friends are 2-4 bytes
 // five later they look. Not eight seconds, every time.
 const REACT_MIN_MS = 60_000;
 const REACT_MAX_MS = 300_000;
-// Even while chatting, nobody reloads their inbox more than every few minutes.
-const MIN_GAP_MS = 10 * 60_000;
+/**
+ * The floor between two inbox reads.
+ *
+ * It was ten minutes, on the reasoning that nobody reloads their inbox more
+ * often than that while chatting. True, and beside the point: a person does
+ * not reload it every ten minutes all day either, and that is what ten minutes
+ * became once every socket flicker booked the next slot. Thirty is a number a
+ * person might plausibly produce on a busy day, and the daily budget below
+ * stops even that from running all day unnoticed.
+ */
+const MIN_GAP_MS = 30 * 60_000;
 // The wait after a failure, doubling while the fault lasts. A person whose
 // page will not load tries again, and then gives it a rest; they do not knock
 // once a minute all day.
@@ -57,6 +67,14 @@ const RETRY_MAX_MS = 30 * 60_000;
 // A long-lived page picks up stale tokens, so it is reloaded now and then -
 // but at no fixed hour, because a reload landing on a six-hour grid is a
 // clock, and clocks are what automation looks like.
+/**
+ * How long everything stops after a scraping warning.
+ *
+ * Longer than the six hours a 429 buys, because a 429 is a rate and this is a
+ * judgement. Long enough that the account is quiet for a day either side of
+ * somebody noticing.
+ */
+const SCRAPING_PAUSE_HOURS = 48;
 const REFRESH_MIN_MS = 4 * 3600_000;
 const REFRESH_MAX_MS = 8 * 3600_000;
 
@@ -71,6 +89,8 @@ type Runtime = {
   wanted: boolean;
   /** Consecutive failures, which is what the retry wait is built from. */
   failures: number;
+  /** The inbox tab's title at the last sync, to tell a message from typing. */
+  lastInboxMark: string | null;
 };
 
 const globalForWatcher = globalThis as unknown as { __igWatcher?: Runtime };
@@ -94,6 +114,7 @@ const runtime: Runtime = (globalForWatcher.__igWatcher ??= {
   starting: null,
   wanted: false,
   failures: 0,
+  lastInboxMark: null,
 });
 
 export function getWatcherState(): WatcherState {
@@ -193,6 +214,20 @@ function scheduleRefresh() {
  * lasted. Anything else is a fault, and faults get a doubling wait.
  */
 async function handleFailure(error: unknown) {
+  // The strongest thing Instagram says short of locking the account, and it
+  // used to be filed as an ordinary fault: park, retry, land on the warning,
+  // and go back to syncing as though nothing had happened. A long pause, and
+  // a person has to lift it.
+  if (error instanceof ScrapingWarningError) {
+    await pauseAutomation(
+      "Instagram served a scraping warning. Everything is stopped until you lift this by hand.",
+      SCRAPING_PAUSE_HOURS,
+    );
+    parked("scraping warning - stopped until a person lifts it");
+    console.error(`[watcher] ${error.message}`);
+    return;
+  }
+
   if (error instanceof SessionExpiredError) {
     parked("signed out - waiting for a new session cookie");
     return;
@@ -266,12 +301,18 @@ function onActivity() {
 async function trigger() {
   const last = runtime.state.lastSyncAt ? Date.parse(runtime.state.lastSyncAt) : 0;
   if (Date.now() - last < MIN_GAP_MS) {
-    // Too soon; try again once the gap has passed.
-    runtime.debounce = setTimeout(() => {
-      runtime.debounce = null;
-      void trigger();
-    }, MIN_GAP_MS - (Date.now() - last) + between(0, 90_000));
-    runtime.debounce.unref?.();
+    // Dropped, not deferred.
+    //
+    // This used to reschedule itself for the moment the gap expired, which
+    // turned the floor into the rate. The socket carries presence and typing
+    // as well as messages, so something lands in almost every ten-minute
+    // window - and each one booked the next sync. The result was a read every
+    // ten minutes, sixteen hours a day, 323 of them over four days, almost all
+    // returning nothing. Instagram called that scraping, and it was right.
+    //
+    // If this really was a new message, the thread it is in will stir again,
+    // and the next look catches it. Nothing is lost that the twice-daily
+    // fallback would not find anyway.
     return;
   }
 
@@ -279,10 +320,84 @@ async function trigger() {
 
   if (!isAwake()) return; // it arrived late; the morning reconnect will catch it
 
+  // A ceiling, so no future bug can quietly become a poller again. This is not
+  // pacing - the gap above is pacing - it is the thing that notices when the
+  // pacing has stopped working.
+  if (!withinDailyBudget()) {
+    console.warn(
+      `[watcher] daily look budget spent (${MAX_SYNCS_PER_DAY}); ` +
+        `not syncing again until tomorrow`,
+    );
+    return;
+  }
+
+  if (isSessionKnownDead()) {
+    // Signed out. One attempt is a check; a schedule of them is a machine
+    // knocking on a door nobody is answering.
+    parked("signed out - waiting for a new sign-in");
+    return;
+  }
+
+  // Does the inbox actually look different?
+  //
+  // The sockets carry presence and typing as well as messages, and the frames
+  // are binary MQTT that this deliberately does not parse. What the open tab
+  // can say for free - no request to Instagram at all - is what its own title
+  // reads, which carries the unread count. If that has not moved since the
+  // last look, the stir was somebody typing, and a look would find nothing.
+  //
+  // A gate, not a gospel: when the title says nothing useful the sync goes
+  // ahead on the gap alone, which is the old behaviour with a longer floor.
+  const mark = await inboxMark();
+  if (mark !== null && mark === runtime.lastInboxMark) {
+    console.log("[watcher] socket stirred but the inbox looks unchanged - not syncing");
+    return;
+  }
+  runtime.lastInboxMark = mark;
+
   runtime.state.lastSyncAt = new Date().toISOString();
   runtime.state.syncsTriggered += 1;
+  noteSyncForBudget();
   console.log("[watcher] activity on the inbox socket - syncing");
   startSync();
+}
+
+/**
+ * The inbox tab's own title, which carries the unread count, or null when
+ * there is no tab or it says nothing recognisable. Read from the page that is
+ * already open: it costs Instagram nothing.
+ */
+async function inboxMark(): Promise<string | null> {
+  const page = currentTab();
+  if (!page || page.isClosed()) return null;
+  try {
+    const title = await page.title();
+    return /\(\d+\)/.test(title) || /inbox|direct/i.test(title) ? title : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How many inbox reads a day is too many.
+ *
+ * Twelve is generous for something whose job is to notice a handful of shared
+ * reels: it is a look every eighty minutes across a waking day, where the
+ * design intends a look when a message actually arrives and twice a day
+ * otherwise. The number exists to be hit loudly rather than to be correct -
+ * reaching it means something upstream is wrong.
+ */
+const MAX_SYNCS_PER_DAY = 12;
+const looks: number[] = [];
+
+function withinDailyBudget(): boolean {
+  const dayAgo = Date.now() - 24 * 3600_000;
+  while (looks.length && looks[0] < dayAgo) looks.shift();
+  return looks.length < MAX_SYNCS_PER_DAY;
+}
+
+function noteSyncForBudget() {
+  looks.push(Date.now());
 }
 
 /** Stopped on purpose, with nothing scheduled. A sign-in starts it again. */
