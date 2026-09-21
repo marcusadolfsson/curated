@@ -34,6 +34,8 @@ type TabRuntime = {
   listeners: Set<TabListener>;
   /** Fetches in flight inside the page. A reload waits for them. */
   busy: number;
+  /** When the last one finished, so a response can be recognised as ours. */
+  lastFetchEndedAt: number;
 };
 
 const globalForTab = globalThis as unknown as { __igTab?: TabRuntime };
@@ -42,7 +44,22 @@ const runtime: TabRuntime = (globalForTab.__igTab ??= {
   opening: null,
   listeners: new Set(),
   busy: 0,
+  lastFetchEndedAt: 0,
 });
+
+/**
+ * Whether a request of ours is in flight inside the page, or just was.
+ *
+ * The watcher listens to the page's own responses to tell a real message from
+ * a typing indicator. Our fetches run inside that same page, so without this
+ * every sync would look like fresh inbox traffic and book the next one - the
+ * exact loop that got this account a scraping warning in the first place. The
+ * grace period covers the gap between the fetch resolving and the response
+ * event arriving.
+ */
+export function fetchingInPage(graceMs = 3_000): boolean {
+  return runtime.busy > 0 || Date.now() - runtime.lastFetchEndedAt < graceMs;
+}
 
 export function onTab(listener: TabListener): () => void {
   runtime.listeners.add(listener);
@@ -242,6 +259,7 @@ async function fetchInPage(
     return await fetchOnce(page, url, api, options, key);
   } finally {
     runtime.busy = Math.max(0, runtime.busy - 1);
+    runtime.lastFetchEndedAt = Date.now();
   }
 }
 

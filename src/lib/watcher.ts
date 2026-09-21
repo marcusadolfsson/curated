@@ -6,7 +6,7 @@ import {
   holdBrowserOpen,
   isSessionKnownDead,
 } from "@/lib/instagram/client";
-import { closeInboxTab, currentTab, inboxTab, onTab } from "@/lib/instagram/tab";
+import { closeInboxTab, currentTab, fetchingInPage, inboxTab, onTab } from "@/lib/instagram/tab";
 import { isAwake, msUntilAwake, msUntilBed } from "@/lib/hours";
 import { between } from "@/lib/pace";
 import { pauseAutomation, pauseState } from "@/lib/pause";
@@ -41,6 +41,8 @@ export type WatcherState = {
   error: string | null;
 };
 
+// The inbox and thread endpoints the page calls when a message lands.
+const DIRECT_API = /\/api\/v1\/direct_v2\//;
 const SOCKET_HOSTS = /edge-chat\.instagram\.com|gateway\.instagram\.com\/ws\//;
 const KEEPALIVE_MAX_BYTES = 16; // MQTT PINGRESP and friends are 2-4 bytes
 
@@ -89,8 +91,8 @@ type Runtime = {
   wanted: boolean;
   /** Consecutive failures, which is what the retry wait is built from. */
   failures: number;
-  /** The inbox tab's title at the last sync, to tell a message from typing. */
-  lastInboxMark: string | null;
+  /** When the page last fetched its own messages. See noteInboxTraffic. */
+  lastInboxTrafficAt: number;
 };
 
 const globalForWatcher = globalThis as unknown as { __igWatcher?: Runtime };
@@ -114,7 +116,7 @@ const runtime: Runtime = (globalForWatcher.__igWatcher ??= {
   starting: null,
   wanted: false,
   failures: 0,
-  lastInboxMark: null,
+  lastInboxTrafficAt: 0,
 });
 
 export function getWatcherState(): WatcherState {
@@ -254,6 +256,25 @@ function msUntilResume(until: string | null): number {
 function attach(page: Page) {
   runtime.state.sockets = 0;
   page.on("websocket", (socket) => watchSocket(socket));
+  page.on("response", (response) => noteInboxTraffic(response.url()));
+}
+
+/**
+ * The page fetching its own messages, which is the signal worth having.
+ *
+ * A socket frame says something happened; it does not say what, because the
+ * frames are binary MQTT and this does not parse them. But when the thing that
+ * happened is a message, the inbox page goes and fetches it - and that request
+ * is visible here for nothing, made by Instagram's own code, against Instagram's
+ * own API paths. Presence and typing produce no such fetch.
+ *
+ * Our own syncs run inside this page too, so they have to be discounted, or
+ * every look would book the next one.
+ */
+function noteInboxTraffic(url: string) {
+  if (!DIRECT_API.test(url)) return;
+  if (fetchingInPage()) return;
+  runtime.lastInboxTrafficAt = Date.now();
 }
 
 function onTabClosed() {
@@ -338,44 +359,21 @@ async function trigger() {
     return;
   }
 
-  // Does the inbox actually look different?
+  // Did the page go and fetch a message of its own accord?
   //
-  // The sockets carry presence and typing as well as messages, and the frames
-  // are binary MQTT that this deliberately does not parse. What the open tab
-  // can say for free - no request to Instagram at all - is what its own title
-  // reads, which carries the unread count. If that has not moved since the
-  // last look, the stir was somebody typing, and a look would find nothing.
-  //
-  // A gate, not a gospel: when the title says nothing useful the sync goes
-  // ahead on the gap alone, which is the old behaviour with a longer floor.
-  const mark = await inboxMark();
-  if (mark !== null && mark === runtime.lastInboxMark) {
-    console.log("[watcher] socket stirred but the inbox looks unchanged - not syncing");
+  // If it did not, the socket stirred for presence or typing and there is
+  // nothing to collect. This replaced reading the tab's title, which was a
+  // guess at what the page had concluded; this is the page's own behaviour.
+  if (runtime.lastInboxTrafficAt <= last) {
+    console.log("[watcher] socket stirred but the inbox fetched nothing - not syncing");
     return;
   }
-  runtime.lastInboxMark = mark;
 
   runtime.state.lastSyncAt = new Date().toISOString();
   runtime.state.syncsTriggered += 1;
   noteSyncForBudget();
   console.log("[watcher] activity on the inbox socket - syncing");
   startSync();
-}
-
-/**
- * The inbox tab's own title, which carries the unread count, or null when
- * there is no tab or it says nothing recognisable. Read from the page that is
- * already open: it costs Instagram nothing.
- */
-async function inboxMark(): Promise<string | null> {
-  const page = currentTab();
-  if (!page || page.isClosed()) return null;
-  try {
-    const title = await page.title();
-    return /\(\d+\)/.test(title) || /inbox|direct/i.test(title) ? title : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
