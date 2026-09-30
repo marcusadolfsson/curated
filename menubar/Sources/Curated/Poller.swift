@@ -85,6 +85,53 @@ final class Poller {
         act { try await $0.clearClaudeToken() }
     }
 
+    /// A token fresh from signing in with Claude.
+    ///
+    /// Through the server when it is up, because that also puts it into the
+    /// running process straight away. Straight to the file when it is not, so
+    /// signing in is never wasted: the next start reads it from there.
+    func adoptClaudeToken(_ token: String) async {
+        let api = CuratedAPI(base: config.localBase)
+        var saved = false
+        if let result = try? await api.setClaudeToken(token), result.saved == true {
+            saved = true
+        } else {
+            saved = Self.writeTokenFile(token)
+        }
+        await refresh()
+
+        if saved {
+            Dialogs.info(
+                "Signed in with Claude",
+                message: "Curated has a new token and will use it to describe posts. "
+                    + "It lasts a year."
+            )
+        } else {
+            Dialogs.info(
+                "Signed in, but could not save the token",
+                message: "Claude issued a token and Curated could not write it to "
+                    + "~/.curated/claude-token. Check that folder is writable and try again."
+            )
+        }
+    }
+
+    private static func writeTokenFile(_ token: String) -> Bool {
+        let url = Paths.claudeTokenPath
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            try Data((token + "\n").utf8).write(to: url, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// The fallback when the sign-in window cannot get past something.
     ///
     /// Instagram rejects a truncated or retired cookie by simply not loading

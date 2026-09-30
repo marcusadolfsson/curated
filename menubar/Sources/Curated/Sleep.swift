@@ -57,6 +57,29 @@ final class SleepGuard {
     /// would be worse than one that admits it.
     private(set) var holding = false
 
+    static let assertionName = "Curated is listening for new posts"
+
+    /// Whether the Mac is being kept awake by Curated - this process or
+    /// another one.
+    ///
+    /// `holding` only knows about this process. `--report` and `--snapshot`
+    /// run as a second copy of the binary that never takes the assertion, so
+    /// they drew the toggle as failed while the running app was holding it
+    /// fine. Asking the system settles it for both.
+    var effectivelyHolding: Bool {
+        holding || Self.heldBySomeCuratedProcess()
+    }
+
+    private static func heldBySomeCuratedProcess() -> Bool {
+        var raw: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&raw) == kIOReturnSuccess,
+              let byProcess = raw?.takeRetainedValue() as? [NSNumber: [[String: Any]]]
+        else { return false }
+        return byProcess.values.joined().contains {
+            ($0[kIOPMAssertionNameKey as String] as? String) == assertionName
+        }
+    }
+
     private func apply() {
         if enabled {
             guard !holding else { return }
@@ -64,7 +87,7 @@ final class SleepGuard {
             let result = IOPMAssertionCreateWithName(
                 kIOPMAssertPreventUserIdleSystemSleep as CFString,
                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                "Curated is listening for new posts" as CFString,
+                Self.assertionName as CFString,
                 &id
             )
             if result == kIOReturnSuccess {
