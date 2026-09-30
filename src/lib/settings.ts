@@ -38,6 +38,14 @@ export const DEFAULTS = {
    * account once. Turn on deliberately, not by default.
    */
   realtime: "false",
+  /**
+   * Write down what the inbox page fetches of its own accord, and nothing
+   * else. Off by default and not a feature: it is the evidence for whether
+   * the sync trigger's assumption holds, and whether the page's own payloads
+   * could be used instead of asking Instagram the same question twice. Shapes
+   * only - counts and timestamps, never message contents.
+   */
+  observePayloads: "false",
   /** React to each post in the DM thread once it has been read. */
   autoReact: "false",
   /** Used only when the model did not choose one. */
