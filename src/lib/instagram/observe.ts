@@ -28,6 +28,17 @@ import { fetchingInPage } from "./tab";
  */
 
 const DIRECT_API = /\/api\/v1\/direct_v2\//;
+/**
+ * Everything the page asks Instagram for, not just the endpoint we happen to
+ * use ourselves.
+ *
+ * Started as direct_v2 only, and saw nothing at all - which is either the
+ * answer (the page never fetches) or a filter looking in the wrong place. The
+ * web client may well carry DMs over GraphQL rather than the private API this
+ * app calls, and a narrow filter cannot tell those two cases apart. So: watch
+ * every API-shaped request to instagram.com and let the log say which.
+ */
+const IG_API = /instagram\.com\/(api\/|graphql)/;
 /** Enough to tell threads apart in a log, not enough to address one. */
 const ID_PREFIX = 8;
 const KEEP = 200;
@@ -52,7 +63,40 @@ export type Observation = {
   note?: string;
 };
 
-const log: Observation[] = [];
+/**
+ * On globalThis, like every other piece of runtime state here.
+ *
+ * The watcher and the route handler that reads this back are separate module
+ * instances in a Next build, so module-level state is two different arrays
+ * wearing the same name. The log filled up correctly and the endpoint
+ * reported nothing, which reads exactly like "the page never fetches" - the
+ * finding this was built to establish. An instrument that can fail into the
+ * shape of its own hypothesis is worse than no instrument.
+ */
+type ObserveStore = { log: Observation[]; totals: { responses: number; instagram: number; matched: number } };
+const globalForObserve = globalThis as unknown as { __igObserve?: ObserveStore };
+const store: ObserveStore = (globalForObserve.__igObserve ??= {
+  log: [],
+  totals: { responses: 0, instagram: 0, matched: 0 },
+});
+const log = store.log;
+
+/**
+ * Every response seen, matched or not.
+ *
+ * Without this, "nothing recorded" has two very different explanations that
+ * look identical: the page really is not calling Instagram's API, or the
+ * listener is not firing at all. One is the answer we came for; the other is a
+ * broken instrument. The totals tell them apart.
+ */
+const totals = store.totals;
+
+export function getTotals() {
+  return { ...totals };
+}
+
+/** Contexts already listened to, so a second page does not double-count. */
+const wired = new WeakSet<object>();
 
 export function getObservations(): Observation[] {
   return [...log].reverse();
@@ -65,13 +109,24 @@ export function clearObservations() {
 /** Attach to a freshly opened inbox page. Cheap when the setting is off. */
 export async function observePage(page: Page) {
   if (!asBool(await getSetting("observePayloads"))) return;
-  page.on("response", (response) => void record(response));
-  console.log("[observe] watching what the inbox page fetches (recording shapes only)");
+
+  // The context, not the page. A page listener misses anything a worker
+  // fetches, and a web app of this size may well do its talking from one -
+  // which would look exactly like a page that never fetches anything.
+  const context = page.context();
+  if (wired.has(context)) return;
+  wired.add(context);
+
+  context.on("response", (response) => void record(response));
+  console.log("[observe] watching every response in the browser context (shapes only)");
 }
 
 async function record(response: Response) {
   const url = response.url();
-  if (!DIRECT_API.test(url)) return;
+  totals.responses += 1;
+  if (url.includes("instagram.com")) totals.instagram += 1;
+  if (!IG_API.test(url)) return;
+  totals.matched += 1;
 
   // Ours, not the page's. Counting our own requests as evidence that the page
   // fetches on its own would answer question 1 with our own footsteps.
@@ -80,13 +135,17 @@ async function record(response: Response) {
   const parsed = new URL(url);
   const entry: Observation = {
     at: new Date().toISOString(),
-    kind: parsed.pathname.includes("/inbox/")
+    kind: DIRECT_API.test(url) && parsed.pathname.includes("/inbox/")
       ? "inbox"
-      : parsed.pathname.includes("/threads/")
+      : DIRECT_API.test(url) && parsed.pathname.includes("/threads/")
         ? "thread"
         : "other",
     path: parsed.pathname.replace(/\/threads\/[^/]+/, "/threads/<id>"),
-    query: Object.fromEntries(parsed.searchParams),
+    // Keys and short values only. A long run of digits in a query string is an
+    // identifier, and identifiers are the thing this is not writing down.
+    query: Object.fromEntries(
+      [...parsed.searchParams].map(([k, v]) => [k, /^\d{6,}$/.test(v) ? "<id>" : v.slice(0, 40)]),
+    ),
     status: response.status(),
     bodyRead: false,
     bytes: null,

@@ -6,7 +6,7 @@ import {
   holdBrowserOpen,
   isSessionKnownDead,
 } from "@/lib/instagram/client";
-import { closeInboxTab, currentTab, fetchingInPage, inboxTab, onTab } from "@/lib/instagram/tab";
+import { closeInboxTab, currentTab, inboxTab, onTab } from "@/lib/instagram/tab";
 import { observePage } from "@/lib/instagram/observe";
 import { isAwake, msUntilAwake, msUntilBed } from "@/lib/hours";
 import { between } from "@/lib/pace";
@@ -20,10 +20,12 @@ import { getSyncState, startSync } from "@/lib/sync";
  * The DM inbox page keeps realtime sockets open - edge-chat.instagram.com and
  * gateway.instagram.com/ws/* - and that is how a new message reaches the tab.
  * The shared inbox tab is therefore also the ear: inbound traffic on those
- * sockets is the signal. The frames are binary MQTT and are not parsed.
- * Keepalives are tiny and filtered on size; anything else is debounced by a
- * human-shaped delay and rate-limited, so a chatty socket costs at most one
- * look every ten minutes.
+ * sockets is the signal. The frames are binary MQTT and are not parsed, so a
+ * stir cannot be told apart from somebody typing. Keepalives are tiny and
+ * filtered on size; anything else is debounced by a human-shaped delay,
+ * dropped if it lands inside the thirty-minute floor, and capped at twelve
+ * looks a day. It used to defer rather than drop, which turned the floor into
+ * the rate and earned a scraping warning.
  *
  * The tab is open during the day and closed at night, like a desktop that
  * gets locked. The twice-daily timer stays as the safety net for when this is
@@ -42,8 +44,6 @@ export type WatcherState = {
   error: string | null;
 };
 
-// The inbox and thread endpoints the page calls when a message lands.
-const DIRECT_API = /\/api\/v1\/direct_v2\//;
 const SOCKET_HOSTS = /edge-chat\.instagram\.com|gateway\.instagram\.com\/ws\//;
 const KEEPALIVE_MAX_BYTES = 16; // MQTT PINGRESP and friends are 2-4 bytes
 
@@ -92,8 +92,6 @@ type Runtime = {
   wanted: boolean;
   /** Consecutive failures, which is what the retry wait is built from. */
   failures: number;
-  /** When the page last fetched its own messages. See noteInboxTraffic. */
-  lastInboxTrafficAt: number;
 };
 
 const globalForWatcher = globalThis as unknown as { __igWatcher?: Runtime };
@@ -117,7 +115,6 @@ const runtime: Runtime = (globalForWatcher.__igWatcher ??= {
   starting: null,
   wanted: false,
   failures: 0,
-  lastInboxTrafficAt: 0,
 });
 
 export function getWatcherState(): WatcherState {
@@ -257,27 +254,8 @@ function msUntilResume(until: string | null): number {
 function attach(page: Page) {
   runtime.state.sockets = 0;
   page.on("websocket", (socket) => watchSocket(socket));
-  page.on("response", (response) => noteInboxTraffic(response.url()));
   // Records what the page fetches, when asked to. Off by default.
   void observePage(page);
-}
-
-/**
- * The page fetching its own messages, which is the signal worth having.
- *
- * A socket frame says something happened; it does not say what, because the
- * frames are binary MQTT and this does not parse them. But when the thing that
- * happened is a message, the inbox page goes and fetches it - and that request
- * is visible here for nothing, made by Instagram's own code, against Instagram's
- * own API paths. Presence and typing produce no such fetch.
- *
- * Our own syncs run inside this page too, so they have to be discounted, or
- * every look would book the next one.
- */
-function noteInboxTraffic(url: string) {
-  if (!DIRECT_API.test(url)) return;
-  if (fetchingInPage()) return;
-  runtime.lastInboxTrafficAt = Date.now();
 }
 
 function onTabClosed() {
@@ -362,15 +340,13 @@ async function trigger() {
     return;
   }
 
-  // Did the page go and fetch a message of its own accord?
-  //
-  // If it did not, the socket stirred for presence or typing and there is
-  // nothing to collect. This replaced reading the tab's title, which was a
-  // guess at what the page had concluded; this is the page's own behaviour.
-  if (runtime.lastInboxTrafficAt <= last) {
-    console.log("[watcher] socket stirred but the inbox fetched nothing - not syncing");
-    return;
-  }
+  // No gate on what kind of stir this was, because there is currently no way
+  // to tell. There was one: wait for the page to fetch its own messages from
+  // /api/v1/direct_v2/. Observation showed the page never calls that endpoint
+  // - it talks GraphQL - so the gate never opened, and delivery had quietly
+  // fallen back to the twice-daily timer. Until the GraphQL traffic gives
+  // something true to key on, a stir is a stir, and what keeps that from
+  // becoming a poller again is the floor above and the daily ceiling below.
 
   runtime.state.lastSyncAt = new Date().toISOString();
   runtime.state.syncsTriggered += 1;
