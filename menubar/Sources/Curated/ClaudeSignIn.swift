@@ -56,11 +56,19 @@ final class ClaudeSignIn {
         self.session = session
 
         Task {
-            // Wait until it has opened the browser and is asking for the code,
-            // so what we type goes to a prompt that is listening for it.
-            let ready = await session.waitFor(timeout: 20) { $0.contains("Paste code here") }
-            guard ready else {
-                finish(failure: session.lastWords() ?? "The sign-in helper did not get as far as asking for a code.")
+            // Wait until it has opened the browser, then ask for the code.
+            //
+            // Either sign will do - the prompt, or the sign-in URL it prints
+            // beside it - and not seeing either is not a reason to give up
+            // while the program is still running. The first version waited
+            // twenty seconds for one exact phrase, never saw it, and killed
+            // the sign-in while the person was still in the browser. The only
+            // thing that ends this early now is the program itself ending.
+            _ = await session.waitFor(timeout: 30) {
+                SetupTokenSession.isAskingForCode($0) || $0.contains("claude.com/cai/oauth/authorize")
+            }
+            guard session.isRunning else {
+                finish(failure: session.lastWords() ?? "The sign-in program stopped before it asked for a code.")
                 return
             }
             askForCode(session, poller: poller)
@@ -76,6 +84,14 @@ final class ClaudeSignIn {
             reopen: { if let url = session.signInURL { NSWorkspace.shared.open(url) } },
             cancel: { [weak self] in self?.finish(failure: nil) }
         ) { [weak self] code in
+            // Signing in can take a while - a password, a second factor - and
+            // the program may have given up waiting in the meantime. Better to
+            // say so than to type a code at nothing and wait a minute for it.
+            guard session.isRunning else {
+                self?.finish(failure: "The sign-in expired before the code arrived. Start again - "
+                    + "the code only works for the sign-in that produced it.")
+                return
+            }
             session.send(code + "\r")
             Task { await self?.collectToken(session, poller: poller) }
         }
