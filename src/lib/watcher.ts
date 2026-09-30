@@ -7,6 +7,7 @@ import {
   isSessionKnownDead,
 } from "@/lib/instagram/client";
 import { closeInboxTab, currentTab, fetchingInPage, inboxTab, onTab } from "@/lib/instagram/tab";
+import { observePage } from "@/lib/instagram/observe";
 import { isAwake, msUntilAwake, msUntilBed } from "@/lib/hours";
 import { between } from "@/lib/pace";
 import { pauseAutomation, pauseState } from "@/lib/pause";
@@ -257,6 +258,8 @@ function attach(page: Page) {
   runtime.state.sockets = 0;
   page.on("websocket", (socket) => watchSocket(socket));
   page.on("response", (response) => noteInboxTraffic(response.url()));
+  // Records what the page fetches, when asked to. Off by default.
+  void observePage(page);
 }
 
 /**
