@@ -53,6 +53,8 @@ final class SetupTokenSession: @unchecked Sendable {
         queue.sync { Self.plain(raw) }
     }
 
+    var isRunning: Bool { process.isRunning }
+
     var signInURL: URL? {
         guard let match = text.range(of: #"https://claude\.com/cai/oauth/authorize\?\S+"#, options: .regularExpression)
         else { return nil }
@@ -102,11 +104,42 @@ final class SetupTokenSession: @unchecked Sendable {
     /// Terminal output as text. Ink moves the cursor rather than printing
     /// spaces, so the words run together - which does not matter for a URL or
     /// a token, the only two things read out of it.
+    /// Whether the CLI is waiting for the code from the browser.
+    ///
+    /// Compared with every bit of whitespace taken out, because what separates
+    /// the words on screen is not always a space. The CLI draws its gaps by
+    /// moving the cursor, and the first version of this waited for the literal
+    /// text "Paste code here" - which never arrived in that form. It gave up
+    /// after twenty seconds, killed the sign-in, and reported a failure while
+    /// the person was still in the browser signing in.
+    static func isAskingForCode(_ text: String) -> Bool {
+        text.filter { !$0.isWhitespace }.contains("Pastecodehere")
+    }
+
     private static func plain(_ raw: String) -> String {
-        var text = raw
+        // Cursor-forward moves are how the gaps between words are drawn, so
+        // they become spaces rather than vanishing. Everything else that
+        // positions or colours is thrown away.
+        var text = expandCursorForward(raw)
         for pattern in [#"\u{1B}\[[0-9;?]*[ -/]*[@-~]"#, #"\u{1B}\][^\u{07}\u{1B}]*(\u{07}|\u{1B}\\)"#, #"\u{1B}[()][A-Z0-9]"#] {
             text = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
         }
         return text.replacingOccurrences(of: "\r", with: "\n")
+    }
+
+    /// `ESC [ n C` - move the cursor n columns right - as n spaces.
+    private static func expandCursorForward(_ raw: String) -> String {
+        guard let pattern = try? NSRegularExpression(pattern: "\u{1B}\\[([0-9]*)C") else { return raw }
+        let source = raw as NSString
+        var result = ""
+        var last = 0
+        for match in pattern.matches(in: raw, range: NSRange(location: 0, length: source.length)) {
+            result += source.substring(with: NSRange(location: last, length: match.range.location - last))
+            let digits = match.range(at: 1).length > 0 ? source.substring(with: match.range(at: 1)) : "1"
+            result += String(repeating: " ", count: min(Int(digits) ?? 1, 200))
+            last = match.range.location + match.range.length
+        }
+        result += source.substring(from: last)
+        return result
     }
 }
