@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { clearObservations, getObservations } from "@/lib/instagram/observe";
+import { clearObservations, getObservations, getTotals } from "@/lib/instagram/observe";
 import { getSetting } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,12 @@ export async function GET() {
   return NextResponse.json({
     watching: (await getSetting("observePayloads")) === "true",
     seen: observations.length,
+    /**
+     * Responses the listener saw at all. If this is zero the instrument is
+     * broken, not the theory; if it is high and `matched` is zero, the page
+     * genuinely is not calling Instagram's API.
+     */
+    totals: getTotals(),
     /**
      * The headline. If the page fetches nothing of its own accord when
      * messages arrive, the sync trigger is waiting for something that never
