@@ -104,6 +104,19 @@ struct MenuView: View {
                 )
             }
 
+            // Whether posts are being described at all. Not a fault when off -
+            // Curated is still a reader without it - so plain rather than red.
+            if let claude = snapshot.claude {
+                Row(
+                    "Claude",
+                    value: claude.ok
+                        ? (claude.source == "token" ? "signed in"
+                            : claude.source == "api-key" ? "API key" : "Claude Code login")
+                        : "not signed in · not describing",
+                    tone: claude.ok ? .good : .plain
+                )
+            }
+
             if let watch = snapshot.watch {
                 Row(
                     "Watcher",
@@ -203,7 +216,7 @@ struct MenuView: View {
             MenuToggle(
                 "Prevent sleep",
                 isOn: SleepGuard.shared.enabled,
-                failed: SleepGuard.shared.enabled && !SleepGuard.shared.holding
+                failed: SleepGuard.shared.enabled && !SleepGuard.shared.effectivelyHolding
             ) {
                 SleepGuard.shared.enabled.toggle()
             }
@@ -262,13 +275,27 @@ struct MenuView: View {
                 }
             }
 
+            // Signing in is the way; pasting a token is the fallback, for a
+            // token made on another machine or when the browser flow will not
+            // cooperate.
+            if ClaudeSignIn.available {
+                MenuButton(
+                    ClaudeSignIn.shared.running
+                        ? "Signing in with Claude - see the browser"
+                        : (snapshot.claude?.ok == true ? "Sign in with Claude again..." : "Sign in with Claude..."),
+                    shortcut: nil
+                ) {
+                    ClaudeSignIn.shared.start(poller: poller)
+                }
+            }
+
             MenuButton(
-                snapshot.claude?.ok == true ? "Replace Claude token..." : "Add a Claude token...",
+                snapshot.claude?.stored == true ? "Paste or remove a Claude token..." : "Paste a Claude token...",
                 shortcut: nil
             ) {
                 Dialogs.prompt(
                     "Claude token",
-                    message: "Make one with `claude setup-token`. It is written to "
+                    message: "A token from `claude setup-token` on any machine. It is written to "
                         + "~/.curated/claude-token and used straight away - no restart. "
                         + "Without it Curated still reads and files posts; it just stops "
                         + "describing and categorising them.",

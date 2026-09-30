@@ -75,6 +75,62 @@ enum Dialogs {
         }
     }
 
+    /// Something happened, and here is what. One button.
+    static func info(_ title: String, message: String) {
+        present {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
+    /// Waiting on a code from a browser.
+    ///
+    /// The third button opens the page again and comes straight back here,
+    /// because "the tab closed" or "it opened behind everything" is the usual
+    /// reason somebody has no code to paste - and that should not cost them
+    /// the whole sign-in.
+    static func codePrompt(
+        _ title: String,
+        message: String,
+        placeholder: String,
+        reopen: @escaping () -> Void,
+        cancel: @escaping () -> Void,
+        then: @escaping (String) -> Void
+    ) {
+        present {
+            while true {
+                let alert = NSAlert()
+                alert.messageText = title
+                alert.informativeText = message
+                alert.addButton(withTitle: "Continue")
+                alert.addButton(withTitle: "Cancel")
+                alert.addButton(withTitle: "Open the Page Again")
+
+                let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+                field.placeholderString = placeholder
+                alert.accessoryView = field
+                alert.window.initialFirstResponder = field
+
+                switch alert.runModal() {
+                case .alertFirstButtonReturn:
+                    let code = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if code.isEmpty { continue }
+                    then(code)
+                    return
+                case .alertThirdButtonReturn:
+                    reopen()
+                    continue
+                default:
+                    cancel()
+                    return
+                }
+            }
+        }
+    }
+
     private static func present(_ body: @escaping () -> Void) {
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
