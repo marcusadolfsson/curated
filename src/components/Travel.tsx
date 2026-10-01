@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import PostPreview from "./PostPreview";
+import TravelMap from "./TravelMap";
 import type { TravelCountry, TravelPost } from "@/app/api/travel/route";
 
 type TravelData = {
@@ -131,6 +132,12 @@ export default function Travel() {
           Back to Curated
         </Link>
       </header>
+
+      {sequence.length > 0 && (
+        <div className="mb-5">
+          <TravelMap posts={sequence} onOpen={show} />
+        </div>
+      )}
 
       {countries.length > 0 && (
         <div className="mb-4 flex items-center justify-between gap-3">

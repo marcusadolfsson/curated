@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { consolidateRegions, fillCities, locatePending, locateState } from "@/lib/places";
+import { consolidateRegions, fillCities, fillCoordinates, locatePending, locateState } from "@/lib/places";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ export async function POST() {
         if (result.checked === 0) {
           await consolidateRegions();
           await fillCities();
+          await fillCoordinates();
         }
       })
       .catch((error) => console.error("[places] failed:", error));
