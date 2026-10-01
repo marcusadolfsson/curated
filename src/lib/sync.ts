@@ -1,5 +1,5 @@
 import { analysisAvailable } from "@/lib/claude-auth";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, syncRuns, threads, type Post } from "@/db/schema";
 import {
@@ -8,6 +8,7 @@ import {
   SessionExpiredError,
   getSessionStatus,
   isSessionKnownDead,
+  ownIdentity,
 } from "@/lib/instagram/client";
 import { pauseAutomation, pauseState } from "@/lib/pause";
 import {
@@ -174,6 +175,17 @@ async function runSync() {
       });
   }
 
+  // Whose shares are whose. The account's own shares used to be filed under
+  // the other person's full name; this puts its name on them, including any
+  // saved before that was fixed, so the two can never drift apart again.
+  const me = await ownIdentity();
+  if (me.username && me.ids.size > 0) {
+    await db
+      .update(posts)
+      .set({ senderUsername: me.username })
+      .where(and(inArray(posts.senderId, [...me.ids]), ne(posts.senderUsername, me.username)));
+  }
+
   // 2. Decide which threads to read. With nothing watched, read everything -
   //    that is how you find the thread worth watching in the first place.
   const watched = await db.select().from(threads).where(eq(threads.watch, true));
@@ -268,6 +280,7 @@ async function runSync() {
             messageId: shared.messageId,
             senderId: shared.senderId,
             senderUsername:
+              (shared.senderId && me.ids.has(shared.senderId) ? me.username : null) ??
               (shared.senderId ? usernameById.get(shared.senderId) : null) ??
               titles.get(threadId) ??
               null,
