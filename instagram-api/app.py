@@ -327,7 +327,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.3.1",
+    version="1.4.0",
     lifespan=lifespan,
 )
 
@@ -806,6 +806,142 @@ def get_post_by_url(
     kind, shortcode = _parse_share_url(url)
     post, cached = _resolve_post_oembed(kind, shortcode)
     return {**post, "cached": cached}
+
+
+# --------------------------------------------------------------------------
+# Direct video URLs (GET /posts/video)
+#
+# Resolves a share URL to a short-lived MP4 CDN URL via yt-dlp (no login).
+# Extraction logic adapted from the camila-feed-watcher resolver. Intended
+# for occasional use (a few lookups a day) — not tight loops. yt-dlp must be
+# installed for the system python3 (pip install yt-dlp); the API venv itself
+# does not need it.
+#
+# NOTE: this route is registered before /posts/{media_id} so that "video"
+# is not captured as a media_id.
+
+VIDEO_CACHE_TTL = 6 * 3600   # 6h; CDN URLs expire, so the TTL is deliberately short
+VIDEO_CACHE_MAX = 200
+
+
+def _video_cache_path() -> Path:
+    return AGENT_MSGS_DIR / "video_cache.json"
+
+
+def _video_cache_get(shortcode: str) -> Optional[str]:
+    try:
+        cache = json.loads(_video_cache_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    entry = cache.get(shortcode)
+    if not isinstance(entry, dict):
+        return None
+    try:
+        fresh = time.time() - entry["fetched_at"] < VIDEO_CACHE_TTL
+    except (KeyError, TypeError):
+        return None
+    url = entry.get("video_url")
+    return url if (fresh and url) else None
+
+
+def _video_cache_set(shortcode: str, video_url: str) -> None:
+    path = _video_cache_path()
+    try:
+        cache = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[shortcode] = {"fetched_at": time.time(), "video_url": video_url}
+    if len(cache) > VIDEO_CACHE_MAX:
+        for key in sorted(cache, key=lambda k: cache[k].get("fetched_at", 0))[
+            : len(cache) - VIDEO_CACHE_MAX
+        ]:
+            del cache[key]
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache))
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def _extract_video_url(page_url: str) -> Optional[str]:
+    """Best progressive MP4 URL via yt-dlp, or None if the post has no video.
+
+    Raises HTTPException(504/502) when extraction itself fails.
+    """
+    try:
+        proc = subprocess.run(
+            ["python3", "-m", "yt_dlp",
+             "--no-playlist", "--skip-download", "--dump-json", "--no-warnings",
+             # Sandbox egress MITMs TLS; yt-dlp otherwise pins certifi's
+             # bundle, which lacks Hatch's CA.
+             "--compat-options", "no-certifi",
+             "--socket-timeout", "30", page_url],
+            capture_output=True, text=True, timeout=150,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="Video extraction timed out") from exc
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip().splitlines()
+        detail = err[-1][:200] if err else f"yt-dlp exit {proc.returncode}"
+        raise HTTPException(status_code=502, detail=f"Video extraction failed: {detail}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502, detail="Video extraction returned bad JSON"
+        ) from exc
+    formats = data.get("formats") or []
+    best = None
+    for f in formats:
+        if f.get("vcodec") in (None, "none"):
+            continue
+        fu = f.get("url") or ""
+        if "mp4" not in fu and f.get("ext") != "mp4":
+            continue
+        if best is None or (f.get("tbr") or 0) > (best.get("tbr") or 0):
+            best = f
+    if best and best.get("url"):
+        return best["url"]
+    return None
+
+
+@app.get("/posts/video", tags=["posts"], dependencies=[Depends(require_api_key)])
+def get_post_video(
+    url: str = Query(..., description="Instagram /p/<code>/ or /reel/<code>/ share URL"),
+) -> dict:
+    """Direct MP4 URL for a shared reel/video post, via yt-dlp (no login).
+
+    Returns a short-lived CDN URL — download it promptly; re-request if it
+    expires. Results are cached 6h per shortcode (the TTL is short because
+    CDN URLs expire). Intended for occasional use (a few lookups a day),
+    not tight loops.
+    """
+    kind, shortcode = _parse_share_url(url)
+    target = f"https://www.instagram.com/{kind}/{shortcode}/"
+    cached = _video_cache_get(shortcode)
+    if cached is not None:
+        return {
+            "shortcode": shortcode,
+            "url": target,
+            "video_url": cached,
+            "cached": True,
+        }
+    video_url = _extract_video_url(target)
+    if not video_url:
+        raise HTTPException(
+            status_code=422,
+            detail="No playable video found (photo post, or Instagram withheld it)",
+        )
+    _video_cache_set(shortcode, video_url)
+    return {
+        "shortcode": shortcode,
+        "url": target,
+        "video_url": video_url,
+        "cached": False,
+    }
 
 
 # --------------------------------------------------------------------------
