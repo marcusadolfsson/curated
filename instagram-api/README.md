@@ -56,6 +56,9 @@ curl -s -H "X-API-Key: $KEY" "http://127.0.0.1:8000/reels?limit=5" | head -c 600
 | POST | `/dms/send` | Send a DM — JSON `{thread_fbid}` or `{recipient_user_fbids:[...]}`, plus `text`, `media_fbid`, `reply_to_message_id` |
 | POST | `/dms/send-file` | Send a DM with a file (multipart; 40 MB max) |
 | POST | `/dms/react` | React to a message — JSON `{"thread_fbid":"...","message_id":"mid.$...","emoji":"❤️"}`. Visible to the other person; new, not yet live-tested |
+| POST | `/dms/react/queue` | Queue a reaction for the sender task — same body as `/dms/react`. Returns immediately, no approval card. Limited to 9 emoji + `REACT_QUEUE_THREADS` |
+| POST | `/dms/send/queue` | Queue a text DM — JSON `{"thread_fbid":"...","text":"..."}`. Returns immediately, no approval card |
+| GET | `/dms/queue` | Outbound queue status (queued / sent / failed) |
 | GET | `/dms/updates?since=&wait=` | New-message event feed (see below) — poll this instead of `/dms/inbox` |
 
 ### DM live updates (`GET /dms/updates`)
@@ -84,6 +87,26 @@ curl -s -H "X-API-Key: $KEY" \
 - Do not poll `/dms/inbox?first=20&message_count=3` in a tight loop yourself —
   every call is a real Instagram request and the provider rate-limits
   persistent polling. Use `/dms/updates` instead.
+
+### Outbound queue (`POST /dms/react/queue`, `POST /dms/send/queue`)
+
+Direct `POST /dms/react` and `POST /dms/send` trigger a per-action approval
+card on the phone (the runtime gates the CLI write itself, no matter who
+called the API). The queue endpoints avoid that: they validate, append to
+`agent_msgs/outbound_queue.json`, and return immediately — no CLI call, no
+card, no blocking.
+
+A scheduled task, `outbound-queue-sender` (every 30s), drains the queue by
+running `drain_outbound_queue.py`, which invokes the CLIs directly. That
+task carries the standing Allow for sending — enable it in the task's Allow
+setting, then enable the task. `GET /dms/queue` shows queued / sent / failed
+items with timestamps.
+
+Narrowing (enforced at enqueue time):
+- Reactions: only ❤️ 😍 🤤 🔥 👏 💡 😂 😮 👍, and only threads listed in
+  `REACT_QUEUE_THREADS` (comma-separated thread_fbids in `.env`).
+- Sends: text-only DMs to a thread, 1000 chars max (no attachments in v1).
+- Identical pending reactions are deduped, not double-queued.
 
 ### Posts & reels
 | Method | Path | Description |
