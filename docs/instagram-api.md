@@ -1,7 +1,7 @@
 # Instagram REST API — replication guide
 
 > Audience: another Muse instance tasked with rebuilding this service.
-> Everything below was true of the original as of 2026-10-01 (v1.6.1).
+> Everything below was true of the original as of 2026-10-01 (v1.6.2).
 
 ## 1. What it is
 
@@ -70,7 +70,7 @@ else is stdlib (`urllib` for the oEmbed fetch — there is deliberately no
 | GET  | `/dms/search?q=` | Search DMs. |
 | POST | `/dms/send` | **Write action.** Requires explicit per-action user approval. Never test-send. |
 | POST | `/dms/react` | Body: `thread_fbid`, `message_id` (`mid.$…`), `emoji`. **Write action** — the runtime approval card fires on the CLI write itself, no matter who called the API (Mac-direct included); there is no architectural bypass. Use the queue endpoints below for prompt-free sending. |
-| POST | `/dms/react/queue`, `/dms/send/queue` | Enqueue-only: validate, append to `agent_msgs/outbound_queue.json`, return immediately — no CLI call, no card, no blocking. Reactions limited to 9 emoji + `REACT_QUEUE_THREADS` (.env); sends are text-only, 1000 chars max. |
+| POST | `/dms/react/queue`, `/dms/send/queue` | Enqueue-only: validate, append to `agent_msgs/outbound_queue.json`, return immediately — no CLI call, no card, no blocking. Reactions limited to 9 emoji + `REACT_QUEUE_THREADS` (.env); sends are text-only, 1000 chars max, with optional `reply_to_message_id` (mid.$…) for quoted replies. |
 | GET | `/dms/queue` | Outbound queue status (queued / sent / failed). |
 | | | Drain: `drain_outbound_queue.py` (run by the `outbound-queue-sender` cron every 30s) invokes the CLIs directly under an flock'd queue file. That scheduled task carries the standing Allow for sending — grant it in the task's Allow setting, then enable the task. |
 | GET  | `/dms/updates?since=&wait=` | New-message event feed backed by a server-side poller (see §5). |

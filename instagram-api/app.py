@@ -218,7 +218,12 @@ def _normalize_dm(thread: dict, msg: dict) -> dict:
     elif isinstance(content, dict):
         xma = content.get("xma") or {}
         share_url = xma.get("target_url")
-        text = content.get("xma_text_body") or ""
+        text = content.get("text_body") or content.get("xma_text_body") or ""
+        if not text:
+            frags = content.get("text_fragments") or []
+            text = "".join(
+                (f.get("plaintext") or "") for f in frags if isinstance(f, dict)
+            )
     return {
         "thread_fbid": thread.get("thread_fbid"),
         "thread_title": thread.get("thread_title"),
@@ -327,7 +332,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.1",
+    version="1.6.2",
     lifespan=lifespan,
 )
 
@@ -619,6 +624,7 @@ def _queue_read() -> List[dict]:
 class SendQueueRequest(BaseModel):
     thread_fbid: str
     text: str
+    reply_to_message_id: Optional[str] = None
 
 
 @app.post("/dms/react/queue", tags=["dms"], dependencies=[Depends(require_api_key)])
@@ -672,6 +678,7 @@ def dm_send_queue(req: SendQueueRequest) -> dict:
 
     Returns immediately with the queue id — no approval card, no blocking.
     Text-only (no attachments in v1), 1000 chars max.
+    Optional reply_to_message_id (a mid.$… id) sends it as a quoted reply.
     """
     text = (req.text or "").strip()
     if not text:
@@ -682,6 +689,7 @@ def dm_send_queue(req: SendQueueRequest) -> dict:
         )
     if not (req.thread_fbid or "").strip():
         raise HTTPException(status_code=400, detail="thread_fbid must not be empty")
+    reply_to = (req.reply_to_message_id or "").strip() or None
 
     def _append(items: List[dict]) -> dict:
         item = {
@@ -692,6 +700,8 @@ def dm_send_queue(req: SendQueueRequest) -> dict:
             "status": "queued",
             "queued_at": time.time(),
         }
+        if reply_to:
+            item["reply_to_message_id"] = reply_to
         items.append(item)
         return {"queued": True, **item}
 
