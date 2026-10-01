@@ -110,8 +110,11 @@ export default function Travel() {
           </h2>
 
           <div className="mt-3 space-y-4">
-            {country.regions.map((region) =>
-              region.posts.length > 1 ? (
+            {country.regions.map((region) => {
+              // A region that is the whole section - Peru in Peru, Antarctica
+              // with no country - needs no heading of its own.
+              const sameAsSection = region.region === country.country;
+              return region.posts.length > 1 && !sameAsSection ? (
                 <div key={region.region}>
                   <h3 className="flex items-baseline gap-2 text-[15px] font-medium text-ink">
                     {region.region}
@@ -119,26 +122,28 @@ export default function Travel() {
                   </h3>
                   <ul className="mt-1.5 space-y-1">
                     {region.posts.map((post) => (
-                      <PlaceRow key={post.id} post={post} title={post.place ?? region.region} onOpen={show} />
+                      <PlaceRow key={post.id} post={post} title={post.place} onOpen={show} />
                     ))}
                   </ul>
                 </div>
               ) : (
-                <ul key={region.region}>
-                  <PlaceRow
-                    post={region.posts[0]}
-                    title={region.posts[0].place ?? region.region}
-                    // The region, when the place's own name does not already say it.
-                    detail={
-                      region.posts[0].place && !region.posts[0].place.includes(region.region)
-                        ? region.region
-                        : null
-                    }
-                    onOpen={show}
-                  />
+                <ul key={region.region} className="space-y-1">
+                  {region.posts.map((post) => (
+                    <PlaceRow
+                      key={post.id}
+                      post={post}
+                      title={post.place ?? (sameAsSection ? null : region.region)}
+                      // The region, when neither the section nor the place's own
+                      // name already says it.
+                      detail={
+                        post.place && !sameAsSection && !post.place.includes(region.region) ? region.region : null
+                      }
+                      onOpen={show}
+                    />
+                  ))}
                 </ul>
-              ),
-            )}
+              );
+            })}
           </div>
         </section>
       ))}
@@ -183,6 +188,11 @@ export default function Travel() {
   );
 }
 
+/**
+ * One post. With no place of its own to name - a post about the region as a
+ * whole - the description is the title, rather than the region's name over
+ * and over.
+ */
 function PlaceRow({
   post,
   title,
@@ -190,7 +200,7 @@ function PlaceRow({
   onOpen,
 }: {
   post: TravelPost;
-  title: string;
+  title: string | null;
   detail?: string | null;
   onOpen: (post: TravelPost) => void;
 }) {
@@ -208,12 +218,23 @@ function PlaceRow({
           <span className="h-14 w-14 shrink-0 rounded-lg bg-sunk" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-[15px] text-ink">
-            {!post.viewed && <span aria-label="unread" className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />}
-            <span className="truncate">{title}</span>
-            {detail && <span className="shrink-0 text-[13px] text-muted">· {detail}</span>}
-          </span>
-          {post.summary && <span className="mt-0.5 line-clamp-2 text-[13px] text-muted">{post.summary}</span>}
+          {title ? (
+            <>
+              <span className="flex items-center gap-1.5 text-[15px] text-ink">
+                {!post.viewed && <span aria-label="unread" className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />}
+                <span className="truncate">{title}</span>
+                {detail && <span className="shrink-0 text-[13px] text-muted">· {detail}</span>}
+              </span>
+              {post.summary && <span className="mt-0.5 line-clamp-2 text-[13px] text-muted">{post.summary}</span>}
+            </>
+          ) : (
+            <span className="flex items-start gap-1.5">
+              {!post.viewed && (
+                <span aria-label="unread" className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+              )}
+              <span className="line-clamp-2 text-[14px] text-ink">{post.summary ?? "A post about the area"}</span>
+            </span>
+          )}
         </span>
       </button>
     </li>
