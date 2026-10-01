@@ -152,7 +152,7 @@ clients reading at once. Two things are different through the API: a share's
 caption and cover come from the post's public oEmbed lookup, and a reel's
 video comes from the API's `/posts/video`, which finds it without the
 account and hands back a signed CDN link that Curated downloads at once.
-Photo galleries arrive as their cover only.
+Every photo of a carousel comes the same way, from `/posts/images`.
 
 **Where the traffic comes from.** This matters more than anything else here.
 Instagram treats datacenter addresses as suspect: from a cloud VM the login

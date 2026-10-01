@@ -315,6 +315,28 @@ export async function postVideo(permalink: string): Promise<string | null> {
   }
 }
 
+export type ApiPostItem = { type: "image" | "video"; url: string; width: number; height: number };
+
+/**
+ * Every entry in a post, in order, each as its largest signed CDN link: all
+ * the photos of a carousel, the one photo of a single post, or a reel's video.
+ * Found without the account, like the video, and cached the same way.
+ */
+export async function postImages(permalink: string): Promise<ApiPostItem[] | null> {
+  try {
+    const data = await call<{ items?: Partial<ApiPostItem>[] }>("GET", "/posts/images", {
+      query: { url: permalink },
+      timeoutMs: 90_000,
+    });
+    return (data.items ?? [])
+      .filter((item): item is ApiPostItem => (item.type === "image" || item.type === "video") && Boolean(item.url))
+      .map((item) => ({ ...item, width: item.width ?? 0, height: item.height ?? 0 }));
+  } catch (error) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) return null;
+    throw error;
+  }
+}
+
 export async function send(options: {
   threadFbid: string;
   text: string;

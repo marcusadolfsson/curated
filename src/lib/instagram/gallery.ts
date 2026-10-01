@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MEDIA_DIR, ensureDirs } from "@/lib/paths";
-import { postVideo, usingApi } from "./api";
+import { postImages, postVideo, usingApi } from "./api";
 import { igFetch, igJson } from "./tab";
 
 /**
@@ -65,6 +65,31 @@ export async function fetchMediaInfo(mediaId: string): Promise<MediaNode | null>
 
 export async function fetchGallery(shortcode: string, mediaId: string): Promise<GalleryImage[]> {
   ensureDirs();
+
+  // Through the API: every entry by link, without the account, and the files
+  // straight off the CDN. Same names and the same rule as below - video
+  // entries in a carousel are skipped - so the viewer cannot tell the two
+  // apart.
+  if (await usingApi()) {
+    const items = await postImages(`https://www.instagram.com/p/${shortcode}/`);
+    if (!items) return [];
+    const images: GalleryImage[] = [];
+    for (const [index, item] of items.entries()) {
+      if (item.type !== "image") continue;
+      const file = `${shortcode}-${index + 1}.jpg`;
+      const target = path.join(MEDIA_DIR, file);
+      if (!fs.existsSync(target)) {
+        const response = await fetch(item.url, { signal: AbortSignal.timeout(60_000) }).catch(() => null);
+        if (!response?.ok) continue;
+        const body = Buffer.from(await response.arrayBuffer());
+        if (body.length === 0) continue;
+        await fs.promises.writeFile(`${target}.part`, body);
+        await fs.promises.rename(`${target}.part`, target);
+      }
+      images.push({ file, width: item.width, height: item.height });
+    }
+    return images;
+  }
 
   const item = await fetchMediaInfo(mediaId);
   if (!item) return [];

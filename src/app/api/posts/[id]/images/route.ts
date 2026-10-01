@@ -67,7 +67,10 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   const cached = parse(post.images);
   if (galleryIsCached(cached)) return NextResponse.json({ images: serve(cached) });
 
-  if (!mediaId) {
+  // Through the API the gallery is found by link, so a missing media id is
+  // no reason to settle for the cover.
+  const throughApi = await usingApi();
+  if (!mediaId && !throughApi) {
     // Nothing to ask Instagram with; the message's own still is all there is.
     return NextResponse.json({
       images: post.thumbnailFile ? [{ url: `/api/media/${post.thumbnailFile}` }] : [],
@@ -75,7 +78,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   }
 
   try {
-    const images = await fetchGallery(post.shortcode, mediaId);
+    const images = await fetchGallery(post.shortcode, mediaId ?? "");
     if (images.length === 0) {
       return NextResponse.json({
         images: post.thumbnailFile ? [{ url: `/api/media/${post.thumbnailFile}` }] : [],
