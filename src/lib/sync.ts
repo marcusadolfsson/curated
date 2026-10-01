@@ -449,6 +449,8 @@ function finish(phase: "done" | "error", error: string | null) {
           (state.reactionsTotal > 0 ? `, ${state.reactionsTotal} reaction${state.reactionsTotal === 1 ? "" : "s"} queued` : "")
         : "Nothing new"
       : (error ?? "Sync failed");
+  // Timestamped, so the observer's lines can be read against it.
+  console.log(`[sync] ${state.finishedAt} finished: ${state.message}`);
 
   if (state.runId !== null) {
     void db

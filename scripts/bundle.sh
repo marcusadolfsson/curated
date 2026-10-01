@@ -82,9 +82,18 @@ fi
 # the request: the previous bundle ended up inside the next one, and the local
 # editor settings came along too. Pruning here is not elegant but it does not
 # depend on the tracer behaving.
-for stray in dist data docs menubar .git .claude; do
+for stray in dist data docs menubar .git .claude .private CLAUDE.md CLAUDE.local.md tools; do
   rm -rf "${OUT:?}/$stray"
 done
+
+# The private notes sit inside the checkout (.private, and CLAUDE.md linked
+# from it), and the tracer has swept up every other directory it found. The
+# app bundle ends up in a public DMG, so a note that rides along is a note
+# published.
+if [ -e "$OUT/.private" ] || find "$OUT" -maxdepth 2 \( -name 'CLAUDE*.md' -o -name '.private' \) -print -quit | grep -q .; then
+  echo "REFUSING: the bundle contains private notes." >&2
+  exit 1
+fi
 
 # The one that must never ship. A bundle carrying data/ carries a live
 # Instagram session and the whole database to wherever it is installed, so this

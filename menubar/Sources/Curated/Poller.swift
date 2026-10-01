@@ -77,14 +77,6 @@ final class Poller {
         act { try await $0.signOut() }
     }
 
-    func setClaudeToken(_ token: String) {
-        act { try await $0.setClaudeToken(token) }
-    }
-
-    func clearClaudeToken() {
-        act { try await $0.clearClaudeToken() }
-    }
-
     /// A token fresh from signing in with Claude.
     ///
     /// Through the server when it is up, because that also puts it into the
@@ -238,8 +230,8 @@ final class Poller {
             }
         }
 
-        if Date().timeIntervalSince(lastSiteCheck) >= siteInterval {
-            next.site = await PublicProbe.check(config.publicURL)
+        if let publicURL = config.publicURL, Date().timeIntervalSince(lastSiteCheck) >= siteInterval {
+            next.site = await PublicProbe.check(publicURL)
             lastSiteCheck = Date()
         } else {
             next.site = snapshot.site
@@ -316,15 +308,17 @@ final class Poller {
         if let counts = snapshot.counts {
             lines.append("Posts:    \(counts.unread) unread of \(counts.total), \(counts.saved) saved")
         }
-        switch snapshot.site {
-        case .reachable(let status) where (200..<300).contains(status):
-            lines.append("Public:   \(config.publicURL.host() ?? "") OPEN - no Access login (HTTP \(status))")
-        case .reachable(let status):
-            lines.append("Public:   \(config.publicURL.host() ?? "") answering (HTTP \(status))")
-        case .unreachable(let why):
-            lines.append("Public:   unreachable — \(why)")
-        case .notChecked:
-            lines.append("Public:   not checked yet")
+        if let host = config.publicURL?.host() {
+            switch snapshot.site {
+            case .reachable(let status) where (200..<300).contains(status):
+                lines.append("Public:   \(host) OPEN - no Access login (HTTP \(status))")
+            case .reachable(let status):
+                lines.append("Public:   \(host) answering (HTTP \(status))")
+            case .unreachable(let why):
+                lines.append("Public:   unreachable — \(why)")
+            case .notChecked:
+                lines.append("Public:   not checked yet")
+            }
         }
         lines.append("Client:   last connect \(snapshot.lastClientConnect == nil && snapshot.clientConnectIsSinceLaunch ? "none seen yet" : Format.relative(snapshot.lastClientConnect))")
 

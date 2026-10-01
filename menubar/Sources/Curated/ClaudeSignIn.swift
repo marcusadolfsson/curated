@@ -75,14 +75,28 @@ final class ClaudeSignIn {
         }
     }
 
+    /// Asks for the code, while watching for the sign-in to finish without one.
+    ///
+    /// There are two ways back from the browser. The page the CLI opens hands
+    /// the result straight to the CLI over localhost, and then shows "You're
+    /// all set up for Claude Code" - no code at all, and the token is already
+    /// being printed. The URL it prints for when the browser did not open
+    /// shows a code to paste instead. The dialog asked for a code either way,
+    /// so the first route - the usual one - left somebody holding a finished
+    /// sign-in and an empty text field, until they gave up on it.
+    ///
+    /// So the dialog closes itself when a token appears, or when the CLI
+    /// stops, whichever comes first.
     private func askForCode(_ session: SetupTokenSession, poller: Poller) {
         Dialogs.codePrompt(
             "Sign in with Claude",
-            message: "Claude's sign-in page has opened in your browser. Sign in and authorise, "
-                + "and the page will show you a code. Paste it here.",
+            message: "Claude's sign-in page has opened in your browser. Sign in and authorise. "
+                + "If the page says you are all set, this closes by itself; if it shows you a code, paste it here.",
             placeholder: "Code from the browser",
             reopen: { if let url = session.signInURL { NSWorkspace.shared.open(url) } },
-            cancel: { [weak self] in self?.finish(failure: nil) }
+            cancel: { [weak self] in self?.finish(failure: nil) },
+            closeWhen: { session.token != nil || !session.isRunning },
+            closed: { [weak self] in Task { await self?.collectToken(session, poller: poller) } }
         ) { [weak self] code in
             // Signing in can take a while - a password, a second factor - and
             // the program may have given up waiting in the meantime. Better to
@@ -110,6 +124,14 @@ final class ClaudeSignIn {
     /// Tears the session down. With a reason, says what went wrong; without
     /// one it was a success or a deliberate cancel, and stays quiet.
     private func finish(failure: String?) {
+        // On failure, what the CLI said goes to the log first - redacted - so
+        // the next "it did not work" can be read rather than guessed at.
+        if let failure, let session {
+            let entry = "[claude-signin] failed: \(failure)\n\(session.redactedTail())\n"
+            let log = Paths.logFile()
+            log.write(Data(entry.utf8))
+            try? log.close()
+        }
         session?.stop()
         session = nil
         if let failure {

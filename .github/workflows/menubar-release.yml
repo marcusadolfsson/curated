@@ -1,0 +1,103 @@
+# Builds Curated.app (the menu bar app, Node, and the server; Apple Silicon
+# only), signs it with Developer ID, and notarizes and staples both the app and
+# its DMG.
+#
+# Push a tag like menubar-v1.1.0 to publish a GitHub release with the
+# notarized DMG; run it by hand (Actions › Menu bar release › Run workflow) to
+# get the DMG as an artifact without publishing.
+#
+# Repository secrets (Settings › Secrets and variables › Actions):
+#   APPLE_CERTIFICATE           base64 of the Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+#   KEYCHAIN_PASSWORD           any string; protects the temporary keychain
+#   APPLE_ID                    the Apple ID used for notarization
+#   APPLE_PASSWORD              an app-specific password for that Apple ID
+#   APPLE_TEAM_ID               ZP8TR4ZYDR
+#
+# Nothing here touches Instagram: the smoke test boots the server against a
+# throwaway data directory with no session in it.
+
+name: Menu bar release
+
+on:
+  push:
+    tags: ["menubar-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: menubar
+
+jobs:
+  release:
+    # An Apple Silicon runner: the app is built for the machine that builds it.
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # Node 22 and not newer: better-sqlite3 has no prebuilt binary past it.
+      # This is the Node that builds the server; the one the app carries is
+      # fetched and checksummed by scripts/fetch-node.sh.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        working-directory: .
+        run: npm ci --no-audit --no-fund
+
+      - name: Import the Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import "$RUNNER_TEMP/cert.p12" -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security list-keychains -d user -s build.keychain login.keychain
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning build.keychain
+
+      - name: Set the version from the tag
+        if: startsWith(github.ref, 'refs/tags/menubar-v')
+        run: |
+          plutil -replace CFBundleShortVersionString -string "${GITHUB_REF_NAME#menubar-v}" Resources/Info.plist
+          plutil -replace CFBundleVersion -string "${{ github.run_number }}" Resources/Info.plist
+
+      - name: Build, sign, smoke test, notarize, staple
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # $$ keeps make from expanding the variables, so the logged command
+        # shows their names, never their values.
+        run: make notarize 'NOTARY_AUTH=--apple-id "$$APPLE_ID" --team-id "$$APPLE_TEAM_ID" --password "$$APPLE_PASSWORD"'
+
+      - name: Keep the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Curated
+          path: menubar/dist/Curated.dmg
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/menubar-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/Curated.dmg --title "Curated ${GITHUB_REF_NAME#menubar-v}" --generate-notes
+
+      - name: Remove the temporary keychain
+        if: always()
+        run: security delete-keychain build.keychain || true

@@ -37,8 +37,8 @@
   <integer>30</integer>
 
   <key>StandardOutPath</key>
-  <string>REPO/data/curated.log</string>
+  <string>HOME/Library/Application Support/Curated/curated.log</string>
   <key>StandardErrorPath</key>
-  <string>REPO/data/curated.log</string>
+  <string>HOME/Library/Application Support/Curated/curated.log</string>
 </dict>
 </plist>

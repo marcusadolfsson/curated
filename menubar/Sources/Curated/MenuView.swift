@@ -157,18 +157,20 @@ struct MenuView: View {
     @ViewBuilder
     private var access: some View {
         Section(title: "Access") {
-            switch snapshot.site {
-            case .reachable(let status):
-                // A success here is the app answering a stranger, not health.
-                Row(
-                    "Public",
-                    value: publicDescription(status),
-                    tone: (200..<300).contains(status) ? .bad : .good
-                )
-            case .unreachable(let why):
-                Row("Public", value: why, tone: .bad)
-            case .notChecked:
-                Row("Public", value: "checking…", tone: .plain)
+            if poller.config.publicURL != nil {
+                switch snapshot.site {
+                case .reachable(let status):
+                    // A success here is the app answering a stranger, not health.
+                    Row(
+                        "Public",
+                        value: publicDescription(status),
+                        tone: (200..<300).contains(status) ? .bad : .good
+                    )
+                case .unreachable(let why):
+                    Row("Public", value: why, tone: .bad)
+                case .notChecked:
+                    Row("Public", value: "checking…", tone: .plain)
+                }
             }
 
             Row(
@@ -195,11 +197,17 @@ struct MenuView: View {
 
     private var actions: some View {
         VStack(alignment: .leading, spacing: 2) {
-            MenuButton("Open Curated", shortcut: nil) {
-                openURL(poller.config.publicURL)
-            }
-            MenuButton("Open on this Mac", shortcut: nil) {
-                openURL(poller.config.localBase)
+            if let publicURL = poller.config.publicURL {
+                MenuButton("Open Curated", shortcut: nil) {
+                    openURL(publicURL)
+                }
+                MenuButton("Open on this Mac", shortcut: nil) {
+                    openURL(poller.config.localBase)
+                }
+            } else {
+                MenuButton("Open Curated", shortcut: nil) {
+                    openURL(poller.config.localBase)
+                }
             }
             MenuButton("Copy status", shortcut: nil) {
                 let pasteboard = NSPasteboard.general
@@ -275,9 +283,6 @@ struct MenuView: View {
                 }
             }
 
-            // Signing in is the way; pasting a token is the fallback, for a
-            // token made on another machine or when the browser flow will not
-            // cooperate.
             if ClaudeSignIn.available {
                 MenuButton(
                     ClaudeSignIn.shared.running
@@ -287,23 +292,6 @@ struct MenuView: View {
                 ) {
                     ClaudeSignIn.shared.start(poller: poller)
                 }
-            }
-
-            MenuButton(
-                snapshot.claude?.stored == true ? "Paste or remove a Claude token..." : "Paste a Claude token...",
-                shortcut: nil
-            ) {
-                Dialogs.prompt(
-                    "Claude token",
-                    message: "A token from `claude setup-token` on any machine. It is written to "
-                        + "~/.curated/claude-token and used straight away - no restart. "
-                        + "Without it Curated still reads and files posts; it just stops "
-                        + "describing and categorising them.",
-                    placeholder: "sk-ant-...",
-                    action: "Save",
-                    removeTitle: snapshot.claude?.stored == true ? "Remove" : nil,
-                    remove: { poller.clearClaudeToken() }
-                ) { poller.setClaudeToken($0) }
             }
 
             // Only in a bundle that carries its own server and has not got a
