@@ -1,7 +1,7 @@
 # Instagram REST API — replication guide
 
 > Audience: another Muse instance tasked with rebuilding this service.
-> Everything below was true of the original as of 2026-10-01 (v1.3.1).
+> Everything below was true of the original as of 2026-10-01 (v1.6.1).
 
 ## 1. What it is
 
@@ -122,11 +122,12 @@ sandbox's egress proxy.
 
 Supervision: `mac-tunnel.sh start` launches a supervisor loop that retries the
 SSH connection every 10s on drop, so brief network or Mac-sleep outages heal
-themselves. A `tunnel-health-watch` cron (every 2 minutes, goal-owned)
+themselves. A `tunnel-health-watch` cron (every 1 minute, goal-owned)
 restarts the supervisor itself if it ever dies — e.g. after a VM reboot.
 Neither the API nor the tunnel starts on boot, but both self-heal within
-minutes via their watcher crons (`api-health-watch` for the API,
-`tunnel-health-watch` for the tunnel).
+about a minute via their watcher crons (`api-health-watch` for the API,
+`tunnel-health-watch` for the tunnel). The runtime recovers saved cron jobs
+across VM replacements, so the watchers are the auto-start mechanism.
 
 ## 7. Agent bridge + scheduled jobs
 
@@ -137,9 +138,11 @@ Three crons keep it alive:
 
 - `agent-inbox-watch` — every 1 minute; surfaces unread `/agent/inbox`
   messages to the operator.
-- `api-health-watch` — every 5 minutes; curls `/health` and restarts the API
-  via `manage.sh` if unreachable. It deliberately never touches the tunnel.
-- `tunnel-health-watch` — every 2 minutes; restarts the tunnel supervisor via
+- `api-health-watch` — every 1 minute; curls `/health` and restarts the API
+  via `manage.sh` if unreachable. It deliberately never touches the tunnel
+  (`manage.sh stop`/`restart` are API-only since v1.6.1; the tunnel is a
+  separate component owned by `tunnel-health-watch`).
+- `tunnel-health-watch` — every 1 minute; restarts the tunnel supervisor via
   `mac-tunnel.sh start` if fully dead. Treats "supervisor running, ssh
   reconnecting" (e.g. Mac asleep) as healthy, and deliberately never touches
   the API process.

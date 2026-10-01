@@ -327,7 +327,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.0",
+    version="1.6.1",
     lifespan=lifespan,
 )
 

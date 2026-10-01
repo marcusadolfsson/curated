@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Manage the Instagram API server.
+# The reverse SSH tunnel is a SEPARATE component (mac-tunnel.sh) and is
+# intentionally never touched here: stopping/restarting the API must not
+# take down the tunnel. tunnel-health-watch owns the tunnel.
 # Usage: ./manage.sh {status|start|stop|restart|logs}
 set -u
 cd "$(dirname "$0")"
@@ -56,7 +59,7 @@ case "${1:-status}" in
       fi
     fi
     rm -f "$PIDFILE"
-    tunnel_cmd stop
+    # NOTE: the tunnel is intentionally left alone here (see header).
     ;;
   restart)
     "$0" stop; sleep 2; "$0" start
