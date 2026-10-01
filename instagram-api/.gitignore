@@ -1,0 +1,11 @@
+# Secrets — never commit
+.env
+
+# Runtime state
+*.log
+*.pid
+agent_msgs/
+uploads/
+.venv/
+__pycache__/
+*.pyc
