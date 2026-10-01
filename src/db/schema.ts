@@ -88,6 +88,9 @@ export const posts = sqliteTable(
     /** The town or city it is in or nearest to ("Ocala", "Saratoga"): what a folded line shows. */
     placeCity: text("placeCity"),
     placeCountry: text("placeCountry"),
+    /** Where to put its dot on the Travel map: the spot, or its city. Approximate is fine. */
+    placeLat: real("placeLat"),
+    placeLng: real("placeLng"),
     /** When the post was last read for a place, found or not; null means not yet. */
     placedAt: integer("placedAt", { mode: "timestamp" }),
   },

@@ -85,6 +85,13 @@
       "when": 1790888813273,
       "tag": "0011_travel_city",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790889000088,
+      "tag": "0012_travel_coordinates",
+      "breakpoints": true
     }
   ]
 }

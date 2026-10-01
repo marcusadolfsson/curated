@@ -26,6 +26,7 @@ const SYSTEM_PROMPT = `You place shared travel posts on a personal travel list. 
 - region: the area this belongs to, at the level a person would plan a trip around and group a list by. That is a major city (Paris, New York City, Kyoto), a famous named area (Swiss Alps, Amalfi Coast, Banff National Park, Bali, Lake Como, the Dolomites), or - in the United States, Canada and Australia, when the place is not in a famous named area - the state or province (Colorado, Arizona, British Columbia). A town or a single site is a place, never a region: St. Moritz and Val d'Anniviers are places in the Swiss Alps; Estes Park and the Black Canyon of the Gunnison are places in Colorado. Several posts sharing a region is the point, so prefer the broader well-known area to a town.
 - city: the town or city the place is in, or nearest to - just its name ("Ocala", "Saratoga", "Charlotte Amalie", "Zermatt"). For a spot in a national park or the wilderness, the park or the nearest town a visitor would stay in. Null when place is null.
 - country: the country, its common English name ("United States", "Italy"). For a place in a US state or similar, the state belongs in the region or place, not here.
+- lat, lng: where to put it on a map, in decimal degrees - the spot when you know it, otherwise its city, otherwise the middle of its region. Approximate is fine. Null only when there is no location at all.
 
 Regions already on the list are given. When a post belongs to one of them, use that exact name; make a new region only when none fits.
 
@@ -44,8 +45,10 @@ const OUTPUT_SCHEMA = {
           city: { type: ["string", "null"] },
           region: { type: ["string", "null"] },
           country: { type: ["string", "null"] },
+          lat: { type: ["number", "null"] },
+          lng: { type: ["number", "null"] },
         },
-        required: ["id", "place", "city", "region", "country"],
+        required: ["id", "place", "city", "region", "country", "lat", "lng"],
         additionalProperties: false,
       },
     },
@@ -54,7 +57,15 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type Located = { id: number; place: string | null; city: string | null; region: string | null; country: string | null };
+type Located = {
+  id: number;
+  place: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+};
 
 type LocateState = { running: boolean; done: number; total: number; error: string | null };
 const globalForPlaces = globalThis as unknown as { __places?: LocateState };
@@ -106,6 +117,7 @@ export async function locatePending(): Promise<{ placed: number; checked: number
             placeCity: clean(found.city),
             placeRegion: region,
             placeCountry: clean(found.country),
+            ...coordinates(found.lat, found.lng),
             placedAt: new Date(),
           })
           .where(eq(posts.id, post.id));
@@ -116,6 +128,7 @@ export async function locatePending(): Promise<{ placed: number; checked: number
     console.log(`[places] placed ${placed} of ${waiting.length} travel post(s)`);
     if (placed > 0) await consolidateRegions();
     await fillCities();
+    await fillCoordinates();
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
     console.error("[places] stopped:", error);
@@ -301,6 +314,89 @@ export async function fillCities(): Promise<number> {
     }
   }
   console.log(`[places] cities for ${filled} of ${waiting.length} place(s)`);
+  return filled;
+}
+
+/** Only coordinates that are on the globe; anything else is no coordinate. */
+function coordinates(lat: unknown, lng: unknown): { placeLat: number | null; placeLng: number | null } {
+  const valid =
+    typeof lat === "number" && typeof lng === "number" && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+  return valid ? { placeLat: lat, placeLng: lng } : { placeLat: null, placeLng: null };
+}
+
+const COORDINATES_PROMPT = `For each entry on a personal travel list, give where to put its dot on a world map, in decimal degrees: the spot when you know it, otherwise its city, otherwise the middle of its region. Approximate is fine - a few kilometres off does not matter. Null only when there is no location at all.`;
+
+const COORDINATES_SCHEMA = {
+  type: "object",
+  properties: {
+    posts: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          lat: { type: ["number", "null"] },
+          lng: { type: ["number", "null"] },
+        },
+        required: ["id", "lat", "lng"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["posts"],
+  additionalProperties: false,
+} as const;
+
+/**
+ * Coordinates for places that were placed before the list kept them. A text
+ * pass like the city one: places and regions stay exactly as they are.
+ */
+export async function fillCoordinates(): Promise<number> {
+  const waiting = await db
+    .select()
+    .from(posts)
+    .where(and(eq(posts.category, "Travel"), isNotNull(posts.placeRegion), isNull(posts.placeLat)));
+  if (waiting.length === 0) return 0;
+
+  const settings = await getSettings();
+  let filled = 0;
+  for (let start = 0; start < waiting.length; start += 40) {
+    const batch = waiting.slice(start, start + 40);
+    const input = batch.map((post) => ({
+      id: post.id,
+      place: post.place,
+      city: post.placeCity || null,
+      region: post.placeRegion,
+      country: post.placeCountry,
+    }));
+    const stream = query({
+      prompt: `The entries:\n${JSON.stringify(input, null, 1)}`,
+      options: {
+        model: settings.analysisModel || undefined,
+        effort: "low",
+        systemPrompt: { type: "custom", prompt: COORDINATES_PROMPT },
+        tools: [],
+        settingSources: [],
+        persistSession: false,
+        env: agentEnv(),
+        maxTurns: 3,
+        outputFormat: { type: "json_schema", schema: COORDINATES_SCHEMA as unknown as Record<string, unknown> },
+      },
+    });
+    let results: { id: number; lat: number | null; lng: number | null }[] = [];
+    for await (const message of stream) {
+      if (message.type !== "result" || message.subtype !== "success") continue;
+      results = (message.structured_output as { posts?: typeof results } | undefined)?.posts ?? [];
+    }
+    for (const result of results) {
+      const point = coordinates(result.lat, result.lng);
+      if (point.placeLat === null) continue; // asked again next time
+      if (!batch.some((post) => post.id === result.id)) continue;
+      await db.update(posts).set(point).where(eq(posts.id, result.id));
+      filled += 1;
+    }
+  }
+  console.log(`[places] coordinates for ${filled} of ${waiting.length} place(s)`);
   return filled;
 }
 
