@@ -44,7 +44,17 @@ case "${1:-status}" in
     ;;
   stop)
     PID="$(api_pid)"
-    [ -n "$PID" ] && kill "$PID" 2>/dev/null && echo "API stopped"
+    if [ -n "$PID" ]; then
+      kill "$PID" 2>/dev/null && echo "API stopping (pid $PID)"
+      # graceful shutdown can take a few seconds; wait for real exit
+      for _ in $(seq 1 15); do
+        kill -0 "$PID" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$PID" 2>/dev/null; then
+        kill -9 "$PID" 2>/dev/null && echo "API force-killed (pid $PID)"
+      fi
+    fi
     rm -f "$PIDFILE"
     tunnel_cmd stop
     ;;
