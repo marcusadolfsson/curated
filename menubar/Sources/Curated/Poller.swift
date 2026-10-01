@@ -294,8 +294,14 @@ final class Poller {
             lines.append("Session:  \(session.connected ? session.summary : session.summary.uppercased())")
         }
         if let watch = snapshot.watch {
-            lines.append("Watcher:  \(watch.listening ? "listening" : "not listening"), \(watch.sockets) sockets, \(watch.eventsSeen) events seen")
-            lines.append("Last sync: \(Format.relative(watch.lastSyncAt))")
+            if watch.throughApi {
+                lines.append("Watcher:  \(watch.summary), \(watch.eventsSeen) new messages seen, Instagram checked \(Format.relative(watch.upstreamCheckedAt))")
+            } else {
+                lines.append("Watcher:  \(watch.listening ? "listening" : "not listening"), \(watch.sockets) sockets, \(watch.eventsSeen) events seen")
+            }
+            // The watcher only knows syncs it started since the app launched;
+            // the server's own record survives a restart.
+            lines.append("Last sync: \(Format.relative(watch.lastSyncAt ?? snapshot.sync?.lastRun?.finishedAt))")
         }
         if let sync = snapshot.sync {
             let run = sync.state

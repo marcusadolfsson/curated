@@ -48,6 +48,8 @@ type Runtime = {
 const globalForApiWatcher = globalThis as unknown as { __igApiWatcher?: Runtime };
 const runtime: Runtime = (globalForApiWatcher.__igApiWatcher ??= {
   state: {
+    via: "api",
+    upstreamCheckedAt: null,
     enabled: false,
     listening: false,
     since: null,
@@ -122,6 +124,7 @@ async function listen() {
         console.log(`[watcher] ${runtime.state.since} listening through the Instagram API`);
       }
       runtime.state.sockets = 1;
+      runtime.state.upstreamCheckedAt = batch.checkedAt ?? runtime.state.upstreamCheckedAt ?? null;
       runtime.state.error = null;
       runtime.failures = 0;
 

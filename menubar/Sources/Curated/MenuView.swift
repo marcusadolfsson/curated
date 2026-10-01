@@ -116,12 +116,17 @@ struct MenuView: View {
             if let watch = snapshot.watch {
                 Row(
                     "Watcher",
-                    value: watch.listening
-                        ? "listening · \(Format.count(watch.sockets, "socket"))"
-                        : (watch.enabled ? "not listening" : "disabled"),
+                    value: watch.summary,
                     tone: watch.listening ? .good : (watch.enabled ? .bad : .plain)
                 )
-                Row("Last event", value: Format.relative(watch.lastEventAt))
+                if watch.throughApi {
+                    // The listener only reads the API's cache; this is when
+                    // the API last asked Instagram, so how fresh "nothing" is.
+                    Row("Checked", value: Format.relative(watch.upstreamCheckedAt))
+                    Row("Last message", value: Format.relative(watch.lastEventAt))
+                } else {
+                    Row("Last event", value: Format.relative(watch.lastEventAt))
+                }
             }
 
             if let sync = snapshot.sync {
