@@ -284,24 +284,31 @@ def _dm_poller_loop() -> None:
             )
             with _dm_lock:
                 known = {m.get("message_id") for m in _dm_snapshot["messages"]}
-            fresh: List[dict] = []
+            # Re-normalize every fetched message each cycle, not just new
+            # ones: a normalization fix must heal already-cached entries
+            # instead of leaving them stale until they age out.
+            norm_by_id: dict = {}
+            new_ids: List[str] = []
             for thread in data.get("threads") or []:
                 for msg in thread.get("messages") or []:
                     norm = _normalize_dm(thread, msg)
-                    if norm["message_id"] and norm["message_id"] not in known:
-                        fresh.append(norm)
-                        known.add(norm["message_id"])
+                    mid = norm.get("message_id")
+                    if not mid:
+                        continue
+                    norm_by_id[mid] = norm
+                    if mid not in known:
+                        known.add(mid)
+                        new_ids.append(mid)
             with _dm_lock:
-                fresh_ids = {f["message_id"] for f in fresh}
-                merged = fresh + [
+                merged = list(norm_by_id.values()) + [
                     m for m in _dm_snapshot["messages"]
-                    if m.get("message_id") not in fresh_ids
+                    if m.get("message_id") not in norm_by_id
                 ]
                 # Newest-first so the cap below always drops the oldest, and
                 # burst messages stay in chronological order for consumers.
                 merged.sort(key=_dm_sort_key, reverse=True)
                 _dm_snapshot["messages"] = merged[:DM_MAX_MESSAGES]
-                _dm_snapshot["last_cycle_ids"] = [f["message_id"] for f in fresh]
+                _dm_snapshot["last_cycle_ids"] = new_ids
                 _dm_snapshot["checked_at"] = _utcnow()
                 _dm_snapshot["failures"] = 0
             _persist_dm_snapshot()
@@ -332,7 +339,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.2",
+    version="1.6.3",
     lifespan=lifespan,
 )
 

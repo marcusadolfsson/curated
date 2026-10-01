@@ -1,7 +1,7 @@
 # Instagram REST API — replication guide
 
 > Audience: another Muse instance tasked with rebuilding this service.
-> Everything below was true of the original as of 2026-10-01 (v1.6.2).
+> Everything below was true of the original as of 2026-10-01 (v1.6.3).
 
 ## 1. What it is
 
@@ -90,7 +90,9 @@ else is stdlib (`urllib` for the oEmbed fetch — there is deliberately no
 `/dms/updates` exists so the Mac can long-poll locally instead of hammering
 Instagram. A background thread in the API process polls the real inbox every
 `DM_POLL_SECONDS` (300s): 20 most-recently-active threads × 20 messages each,
-normalized, sorted newest-first, capped at 300 messages. The `since` parameter
+normalized, sorted newest-first, capped at 300 messages. Every poll
+re-normalizes all fetched messages with the current code (not just new ones),
+so a normalization fix heals already-cached entries on the next cycle. The `since` parameter
 is compared strictly against each item's `sent_at` (derived from
 `message_sent_at.utc`). Coverage is the 20 most-recently-active threads only —
 a newly active thread normally sorts into that set, but this is not a
