@@ -173,7 +173,7 @@ export default function AnalysisSettings() {
           <span className="text-[14px]">
             Listen for new messages and sync right away
             <span className="block text-[12px] text-muted">
-              Keeps a browser open on your inbox. The hourly check still runs as a fallback.
+              Reads new messages as they arrive. Off, posts arrive only when you press Check for new.
             </span>
           </span>
         </label>

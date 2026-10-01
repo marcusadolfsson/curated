@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { consolidateRegions, locatePending, locateState } from "@/lib/places";
+import { consolidateRegions, fillCities, locatePending, locateState } from "@/lib/places";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,12 @@ export async function POST() {
     // Placing tidies the regions itself when it placed anything; with nothing
     // left to place, a call here still tidies, for a list placed before that.
     void locatePending()
-      .then((result) => (result.checked === 0 ? consolidateRegions() : 0))
+      .then(async (result) => {
+        if (result.checked === 0) {
+          await consolidateRegions();
+          await fillCities();
+        }
+      })
       .catch((error) => console.error("[places] failed:", error));
   }
   return NextResponse.json(locateState());
