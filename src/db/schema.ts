@@ -78,6 +78,16 @@ export const posts = sqliteTable(
     analysisCostUsd: real("analysisCostUsd"),
     analysisError: text("analysisError"),
     analyzedAt: integer("analyzedAt", { mode: "timestamp" }),
+
+    // Where a travel post is, for the Travel list. `place` is the most specific
+    // spot it names ("Igludorf, Zermatt"), `placeRegion` the destination it
+    // belongs to and is grouped under ("Swiss Alps"), `placeCountry` the
+    // country. All three empty when the post is not about one place.
+    place: text("place"),
+    placeRegion: text("placeRegion"),
+    placeCountry: text("placeCountry"),
+    /** When the post was last read for a place, found or not; null means not yet. */
+    placedAt: integer("placedAt", { mode: "timestamp" }),
   },
   (table) => [
     index("posts_sharedAt_idx").on(table.sharedAt),

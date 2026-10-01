@@ -28,6 +28,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       return NextResponse.json({ error: "Not one of the categories." }, { status: 400 });
     }
     changes.category = body.category;
+    // A post moved into Travel is placed on the next sync; one moved out
+    // drops off the list because the list only reads Travel.
+    changes.placedAt = null;
   }
 
   if (Object.keys(changes).length === 0) {

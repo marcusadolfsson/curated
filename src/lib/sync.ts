@@ -25,6 +25,7 @@ import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
 import { analyzeAndStore, analysisConcurrency } from "@/lib/analyze";
+import { locatePending } from "@/lib/places";
 import { pause } from "@/lib/pace";
 import { asBool, asInt, getSettings } from "@/lib/settings";
 import { queueReactions } from "@/lib/reactions";
@@ -339,6 +340,13 @@ async function runSync() {
       state.postsAnalyzed += 1;
       state.message = `Describing posts (${state.postsAnalyzed} of ${state.analysisTotal})`;
     });
+  }
+
+  // 4b. Put the travel posts just described on the Travel list. Text only,
+  //     off what the description already says.
+  if (analysisAvailable()) {
+    state.message = "Placing travel posts";
+    await locatePending();
   }
 
   // 5. Let the sender know it landed - later, one at a time, and only for what
