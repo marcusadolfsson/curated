@@ -24,6 +24,8 @@ type TravelData = {
 export default function Travel() {
   const [data, setData] = useState<TravelData | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  /** The posts in the circle last tapped on the map, listed under it. */
+  const [selection, setSelection] = useState<TravelPost[] | null>(null);
   const [sort, setSort] = useState<Sort>("alpha");
   /** Regions showing their posts, by `country / region`. Everything starts folded. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -135,7 +137,10 @@ export default function Travel() {
 
       {sequence.length > 0 && (
         <div className="mb-5">
-          <TravelMap posts={sequence} onOpen={show} />
+          <TravelMap posts={sequence} onOpen={show} onSelect={setSelection} />
+          {selection && selection.length > 0 && (
+            <Selection posts={selection} onOpen={show} onClose={() => setSelection(null)} />
+          )}
         </div>
       )}
 
@@ -285,6 +290,93 @@ export default function Travel() {
           onChangeCategory={(id, category) => patch(id, { category })}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * What a tapped circle holds: its countries, the places in them, and every
+ * post, all open. Countries and places with the most posts first, since a
+ * circle is a question about where she keeps sending things from.
+ */
+function Selection({
+  posts,
+  onOpen,
+  onClose,
+}: {
+  posts: TravelPost[];
+  onOpen: (post: TravelPost) => void;
+  onClose: () => void;
+}) {
+  const groups = useMemo(() => {
+    const byCountry = new Map<string, Map<string, TravelPost[]>>();
+    for (const post of posts) {
+      const country = post.country ?? post.region;
+      const places = byCountry.get(country) ?? new Map<string, TravelPost[]>();
+      const list = places.get(post.region) ?? [];
+      list.push(post);
+      places.set(post.region, list);
+      byCountry.set(country, places);
+    }
+    return [...byCountry.entries()]
+      .map(([country, places]) => ({
+        country,
+        count: [...places.values()].reduce((sum, list) => sum + list.length, 0),
+        places: [...places.entries()]
+          .map(([region, list]) => ({ region, posts: list }))
+          .sort((a, b) => b.posts.length - a.posts.length || a.region.localeCompare(b.region)),
+      }))
+      .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
+  }, [posts]);
+
+  const summary =
+    groups.length === 1
+      ? groups[0].places.length === 1
+        ? groups[0].places[0].region
+        : `${groups[0].places.length} places in ${groups[0].country}`
+      : `${groups.length} countries`;
+
+  return (
+    <div className="mt-3 rounded-xl bg-surface p-4 ring-1 ring-line">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[14px] text-ink">
+          <span className="font-medium">
+            {posts.length} post{posts.length === 1 ? "" : "s"}
+          </span>
+          <span className="text-muted"> · {summary}</span>
+        </p>
+        <button type="button" onClick={onClose} className="text-[13px] text-accent underline-offset-4 hover:underline">
+          Close
+        </button>
+      </div>
+
+      <div className="mt-3 max-h-[420px] space-y-4 overflow-y-auto">
+        {groups.map((group) => (
+          <div key={group.country}>
+            {groups.length > 1 && (
+              <h3 className="flex items-baseline justify-between font-serif text-lg">
+                {group.country}
+                <span className="font-sans text-[13px] text-muted">{group.count}</span>
+              </h3>
+            )}
+            {group.places.map((place) => (
+              <div key={place.region} className="mt-1.5">
+                {(groups.length > 1 || group.places.length > 1) && (
+                  <p className="flex items-baseline gap-2 px-2 text-[14px] font-medium text-ink">
+                    {place.region === group.country ? `Across ${place.region}` : place.region}
+                    <span className="text-[12px] font-normal text-muted">{place.posts.length}</span>
+                  </p>
+                )}
+                <ul className="mt-0.5 space-y-1">
+                  {place.posts.map((post) => (
+                    <PlaceRow key={post.id} post={post} title={post.place ?? post.city} onOpen={onOpen} />
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
