@@ -23,6 +23,35 @@ type TravelData = {
 export default function Travel() {
   const [data, setData] = useState<TravelData | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  const [sort, setSort] = useState<Sort>("alpha");
+  /** Regions showing their posts, by `country / region`. Everything starts folded. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // The sort is a per-viewer convenience, so it lives in this browser only.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SORT_KEY);
+      if (saved === "alpha" || saved === "count") setSort(saved);
+    } catch {
+      // private mode or storage blocked: alphabetical it is
+    }
+  }, []);
+  const chooseSort = (next: Sort) => {
+    setSort(next);
+    try {
+      window.localStorage.setItem(SORT_KEY, next);
+    } catch {
+      // nothing to remember into
+    }
+  };
+
+  const toggle = (key: string) =>
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const load = useCallback(async () => {
     const response = await fetch("/api/travel").catch(() => null);
@@ -40,11 +69,29 @@ export default function Travel() {
     return () => clearInterval(timer);
   }, [data?.locating.running, load]);
 
+  /** Countries and their regions in the chosen order. */
+  const countries = useMemo(() => {
+    const byName = (a: string, b: string) => a.localeCompare(b);
+    return (data?.countries ?? [])
+      .map((country) => ({
+        ...country,
+        regions: [...country.regions].sort((a, b) =>
+          sort === "count"
+            ? b.posts.length - a.posts.length || byName(a.region, b.region)
+            : byName(a.region, b.region),
+        ),
+      }))
+      .sort((a, b) => (sort === "count" ? b.count - a.count || byName(a.country, b.country) : byName(a.country, b.country)));
+  }, [data, sort]);
+
   /** Every post in the order the page shows them, for the viewer to step through. */
-  const sequence = useMemo(
-    () => (data?.countries ?? []).flatMap((c) => c.regions.flatMap((r) => r.posts)),
-    [data],
+  const sequence = useMemo(() => countries.flatMap((c) => c.regions.flatMap((r) => r.posts)), [countries]);
+
+  const allKeys = useMemo(
+    () => countries.flatMap((c) => c.regions.map((r) => regionKey(c.country, r.region))),
+    [countries],
   );
+  const everythingOpen = allKeys.length > 0 && allKeys.every((key) => expanded.has(key));
 
   const patch = async (id: number, changes: { viewed?: boolean; saved?: boolean; category?: string }) => {
     await fetch(`/api/posts/${id}`, {
@@ -85,6 +132,38 @@ export default function Travel() {
         </Link>
       </header>
 
+      {countries.length > 0 && (
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div role="group" aria-label="Sort" className="flex rounded-full bg-sunk p-0.5 text-[13px]">
+            {(
+              [
+                ["alpha", "A–Z"],
+                ["count", "Most posts"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={sort === value}
+                onClick={() => chooseSort(value)}
+                className={`rounded-full px-3 py-1 transition-colors ${
+                  sort === value ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded(everythingOpen ? new Set() : new Set(allKeys))}
+            className="text-[13px] text-accent underline-offset-4 hover:underline"
+          >
+            {everythingOpen ? "Collapse all" : "Expand all"}
+          </button>
+        </div>
+      )}
+
       {(locating.running || data.waiting || locating.error) && (
         <div className="mb-6 rounded-xl bg-sunk px-4 py-3 text-[14px] text-ink-soft">
           {locating.running ? (
@@ -102,49 +181,68 @@ export default function Travel() {
         </div>
       )}
 
-      {data.countries.map((country) => (
-        <section key={country.country} className="border-t border-line py-6">
+      {countries.map((country) => (
+        <section key={country.country} className="border-t border-line py-5">
           <h2 className="flex items-baseline justify-between gap-3">
             <span className="font-serif text-2xl">{country.country}</span>
             <span className="text-[13px] text-muted">{country.count}</span>
           </h2>
 
-          <div className="mt-3 space-y-4">
+          <ul className="mt-2">
             {country.regions.map((region) => {
+              const key = regionKey(country.country, region.region);
+              const isOpen = expanded.has(key);
               // A region that is the whole section - Peru in Peru, Antarctica
-              // with no country - needs no heading of its own.
+              // with no country - holds the posts about it in general.
               const sameAsSection = region.region === country.country;
-              return region.posts.length > 1 && !sameAsSection ? (
-                <div key={region.region}>
-                  <h3 className="flex items-baseline gap-2 text-[15px] font-medium text-ink">
-                    {region.region}
-                    <span className="text-[13px] font-normal text-muted">{region.posts.length}</span>
-                  </h3>
-                  <ul className="mt-1.5 space-y-1">
-                    {region.posts.map((post) => (
-                      <PlaceRow key={post.id} post={post} title={post.place} onOpen={show} />
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                <ul key={region.region} className="space-y-1">
-                  {region.posts.map((post) => (
-                    <PlaceRow
-                      key={post.id}
-                      post={post}
-                      title={post.place ?? (sameAsSection ? null : region.region)}
-                      // The region, when neither the section nor the place's own
-                      // name already says it.
-                      detail={
-                        post.place && !sameAsSection && !post.place.includes(region.region) ? region.region : null
-                      }
-                      onOpen={show}
-                    />
-                  ))}
-                </ul>
+              const single = region.posts.length === 1 ? region.posts[0] : null;
+              // A place sent once is named by the place itself.
+              const label = sameAsSection
+                ? `Across ${region.region}`
+                : single?.place && !single.place.includes(region.region)
+                  ? single.place
+                  : region.region;
+              const detail =
+                single?.place && !sameAsSection && label === single.place ? region.region : null;
+              const unread = region.posts.filter((post) => !post.viewed).length;
+
+              return (
+                <li key={region.region}>
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() => toggle(key)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-sunk"
+                  >
+                    <Chevron open={isOpen} />
+                    <span className="min-w-0 flex-1 truncate text-[15px] text-ink">
+                      {label}
+                      {detail && <span className="text-[13px] text-muted"> · {detail}</span>}
+                    </span>
+                    {unread > 0 && (
+                      <span aria-label={`${unread} unread`} className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                    )}
+                    <span className="w-6 shrink-0 text-right text-[13px] text-muted">{region.posts.length}</span>
+                  </button>
+
+                  {isOpen && (
+                    <ul className="mt-0.5 mb-2 space-y-1 pl-6">
+                      {region.posts.map((post) => (
+                        <PlaceRow
+                          key={post.id}
+                          post={post}
+                          // Under its own heading, a post is named by its place,
+                          // or by its description when it is about the area.
+                          title={single ? null : post.place}
+                          onOpen={show}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </li>
               );
             })}
-          </div>
+          </ul>
         </section>
       ))}
 
@@ -185,6 +283,27 @@ export default function Travel() {
         />
       )}
     </div>
+  );
+}
+
+type Sort = "alpha" | "count";
+const SORT_KEY = "curated.travel.sort";
+
+function regionKey(country: string, region: string) {
+  return `${country} / ${region}`;
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      aria-hidden="true"
+      className={`shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`}
+    >
+      <path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
