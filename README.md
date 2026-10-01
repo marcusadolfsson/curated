@@ -149,8 +149,10 @@ Switch with `POST /api/source` and `{"source": "api"}` (or `"browser"` to go
 back). It refuses mid-sync, closes the browser before the listener starts, and
 from then on the browser refuses to open at all, so the account never has two
 clients reading at once. Two things are different through the API: a share's
-caption and cover come from the post's public oEmbed lookup, and there is no
-video file to be had, so a new reel shows its cover and opens in Instagram.
+caption and cover come from the post's public oEmbed lookup, and a reel's
+video comes from the API's `/posts/video`, which finds it without the
+account and hands back a signed CDN link that Curated downloads at once.
+Photo galleries arrive as their cover only.
 
 **Where the traffic comes from.** This matters more than anything else here.
 Instagram treats datacenter addresses as suspect: from a cloud VM the login

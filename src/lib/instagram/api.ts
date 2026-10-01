@@ -294,6 +294,27 @@ export async function postByUrl(permalink: string): Promise<ApiPost | null> {
   }
 }
 
+/**
+ * A reel's video, as a short-lived signed CDN link.
+ *
+ * The API gets it without the account - a logged-out lookup on its side - and
+ * keeps it for a few hours per shortcode. The link expires, so it is for
+ * downloading at once, not for storing.
+ */
+export async function postVideo(permalink: string): Promise<string | null> {
+  try {
+    const data = await call<{ video_url?: string }>("GET", "/posts/video", {
+      query: { url: permalink },
+      timeoutMs: 90_000,
+    });
+    return data.video_url ?? null;
+  } catch (error) {
+    // A photo post, a withheld video, a deleted post: no reel to keep.
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) return null;
+    throw error;
+  }
+}
+
 export async function send(options: {
   threadFbid: string;
   text: string;
