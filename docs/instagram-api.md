@@ -31,13 +31,14 @@ are never committed; see `instagram-api/.gitignore`.)
 
 | File              | Purpose                                                                 |
 |-------------------|-------------------------------------------------------------------------|
-| `app.py`          | The whole API (~800 lines). FastAPI app, all endpoints, DM poller thread, oEmbed cache. |
+| `app.py`          | The whole API (~1000 lines). FastAPI app, all endpoints, DM poller thread, oEmbed cache. |
+| `extract_post_json.py` | Helper for `GET /posts/images`: captures the raw logged-out Instagram post JSON (every carousel child) by reusing yt-dlp's extractor internals. Called as a subprocess; yt-dlp must be installed for the system python3. |
 | `start.sh`        | Launches uvicorn on `$PORT` (default 8000) using the venv.              |
 | `manage.sh`       | `start` / `stop` / `restart` / `status` / `logs` for the API process (pidfile-based). |
 | `.env`            | `IG_API_KEY`, `PORT`, `DM_POLL_SECONDS`. Never commit this.             |
 | `mac-tunnel.sh`   | `start` / `stop` / `restart` / `status` / `logs` for the reverse SSH tunnel to the Mac. |
 | `tunnel-proxy.py` | `ProxyCommand` helper: the sandbox reaches the outside world through an egress HTTP proxy (`127.0.0.1:3130`); SSH to the Mac is tunneled through it. Without this, outbound SSH is reset by the proxy. |
-| `agent_msgs/`     | JSON storage for the agent bridge (`inbox.json`, `outbox.json`, `oembed_cache.json`). Created at runtime. |
+| `agent_msgs/`     | JSON storage for the agent bridge (`inbox.json`, `outbox.json`) and lookup caches (`oembed_cache.json`, `video_cache.json`, `image_cache.json`). Created at runtime. |
 | `README.md`       | Operator-facing reference (endpoints, config, management).              |
 
 Runtime: Python 3.12, venv with `fastapi`, `uvicorn`, `pydantic`. Everything
@@ -71,6 +72,7 @@ else is stdlib (`urllib` for the oEmbed fetch — there is deliberately no
 | GET  | `/dms/updates?since=&wait=` | New-message event feed backed by a server-side poller (see §5). |
 | GET  | `/posts/by-url?url=` | Resolves a `/p/<code>/` or `/reel/<code>/` share URL via Instagram's public oEmbed endpoint (no login). Returns caption, author (username/url/id), classic media ID, thumbnail URL + dimensions, embed HTML. Cached 24h per shortcode in `agent_msgs/oembed_cache.json`. Accepts `/reels/` and normalizes it. 400 for non-Instagram or non-post URLs, 404 when Instagram can't resolve the URL (deleted/private post). |
 | GET  | `/posts/video?url=` | Direct MP4 URL for a shared reel/video post via yt-dlp (no login). Returns a short-lived CDN URL — download promptly, re-request on expiry. Cached 6h per shortcode in `agent_msgs/video_cache.json` (short TTL, the URLs expire). 400 bad URL, 422 no playable video (photo post or withheld), 502/504 extraction failed. Occasional use only, not loops. Registered before `/posts/{media_id}` so "video" isn't captured as an ID. |
+| GET  | `/posts/images?url=` | Every image for a shared post/carousel via the logged-out post JSON (same query yt-dlp uses, but yt-dlp itself ignores photos). Returns entries in order as `{type, url, width, height}` with the largest CDN URL per entry; single photos return one item, reels return one video item (same URL `/posts/video` gives). Cached 6h per shortcode in `agent_msgs/image_cache.json`. 400 bad URL, 422 no accessible media, 502/504 extraction failed. Occasional use only. Registered before `/posts/{media_id}`. |
 | GET  | `/posts/{media_id}` | Provider lookup by numeric media ID (caption, owner, permalink, counts, sometimes a thumbnail). Does **not** return video URLs or full-size images. Note: classic shortcode base64-decoding and DM share-URL `?id=` values do **not** resolve here — they are separate ID spaces. |
 | GET  | `/posts/{media_id}/comments`, `/likers`, `/insights` | As named. |
 | POST | `/posts/publish` | **Write action** — same approval rule. |

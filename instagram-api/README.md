@@ -94,6 +94,7 @@ curl -s -H "X-API-Key: $KEY" \
 | GET | `/posts/{media_id}` | Single post — works for other accounts' posts too (see notes) |
 | GET | `/posts/by-url?url=` | Resolve a /p/ or /reel/ share URL to metadata (see below) |
 | GET | `/posts/video?url=` | Direct MP4 URL for a shared reel/video post (see below) |
+| GET | `/posts/images?url=` | Every image for a shared post/carousel, largest CDN URLs (see below) |
 | GET | `/posts/{media_id}/comments?limit=&after=` | Comments |
 | GET | `/posts/{media_id}/likers?limit=&after=` | Likers |
 | GET | `/insights?start_time=&end_time=` | Account insights (unix seconds; professional accounts) |
@@ -169,6 +170,28 @@ withheld it), and 502/504 when extraction fails or times out. Intended for
 occasional use (a few lookups a day), not tight loops. Requires yt-dlp
 installed for the system python3 (`pip install yt-dlp`); the API venv does
 not need it.
+
+## Carousel / photo image lookup (`GET /posts/images?url=<share_url>`)
+
+For carousels and photo posts shared in DMs — the provider lookup returns no
+usable image URLs, and yt-dlp itself only emits video. The same logged-out
+GraphQL post query yt-dlp uses carries every carousel child with full image
+data, so this endpoint captures that raw response (`extract_post_json.py`)
+and returns the largest CDN URL per entry, in order:
+
+```bash
+curl -s -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:8000/posts/images?url=https://www.instagram.com/p/DOL6hKXgPSJ/"
+```
+
+Returns `shortcode`, `url`, `cached`, and `items` — each item is
+`{type, url, width, height}` with `type` of `image` or `video`. A
+single-photo post returns one item; a reel returns one video item (the same
+URL `/posts/video` would give). The CDN URLs are short-lived — download them
+promptly and re-request if they go stale. Results are cached 6h per shortcode.
+Returns 400 for bad URLs, 422 when the post has no accessible media (private
+post, or Instagram withheld it), and 502/504 when extraction fails or times
+out. Intended for occasional use (a few lookups a day), not tight loops.
 
 ## Managing the server
 
