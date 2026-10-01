@@ -69,14 +69,39 @@ final class SetupTokenSession: @unchecked Sendable {
         return String(text[match])
     }
 
-    /// The last thing it said that looks like a sentence, for an error dialog.
+    /// The most useful thing it said, for an error dialog.
+    ///
+    /// An error line if there is one, otherwise the last line of any length.
+    /// It used to be simply the last line, which after a failed exchange is
+    /// "Press Enter to retry." - true, and no help to anybody reading it in a
+    /// dialog where there is nothing to press Enter on.
     /// Never used once a token has appeared, so it cannot surface one.
     func lastWords() -> String? {
         let text = self.text
         guard Self.token(in: text) == nil else { return nil }
-        return text.split(whereSeparator: \.isNewline)
+        let lines = text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .last { $0.count > 12 && !$0.hasPrefix("http") && !$0.contains("Paste code") }
+            .filter { $0.count > 12 && !$0.hasPrefix("http") && !Self.isAskingForCode($0) }
+        return lines.last { $0.localizedCaseInsensitiveContains("error") || $0.localizedCaseInsensitiveContains("timed out") }
+            ?? lines.last
+    }
+
+    /// The end of the conversation with the CLI, safe to write to a log.
+    ///
+    /// Tokens are cut out. So is anything long and unbroken, because the code
+    /// pasted from the browser is a credential until it has been used, and the
+    /// CLI echoes it back masked but not every build is guaranteed to.
+    func redactedTail(lines count: Int = 15) -> String {
+        let spinner = CharacterSet(charactersIn: "·✢✳✶✻✽* ")
+        let kept = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.unicodeScalars.allSatisfy(spinner.contains) }
+        return kept.suffix(count)
+            .map { line in
+                line.replacingOccurrences(of: #"sk-ant-[A-Za-z0-9_\-]+"#, with: "sk-ant-<redacted>", options: .regularExpression)
+                    .replacingOccurrences(of: #"[A-Za-z0-9_\-#]{24,}"#, with: "<redacted>", options: .regularExpression)
+            }
+            .joined(separator: "\n")
     }
 
     func send(_ input: String) {

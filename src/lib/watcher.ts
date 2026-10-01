@@ -351,7 +351,7 @@ async function trigger() {
   runtime.state.lastSyncAt = new Date().toISOString();
   runtime.state.syncsTriggered += 1;
   noteSyncForBudget();
-  console.log("[watcher] activity on the inbox socket - syncing");
+  console.log(`[watcher] ${runtime.state.lastSyncAt} activity on the inbox socket - syncing`);
   startSync();
 }
 

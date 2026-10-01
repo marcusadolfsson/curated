@@ -45,8 +45,18 @@ const KEEP = 200;
 
 export type Observation = {
   at: string;
-  kind: "inbox" | "thread" | "other";
+  kind: "inbox" | "thread" | "graphql" | "other";
   path: string;
+  /**
+   * Which GraphQL query this was, by the name the page gives it - the
+   * x-fb-friendly-name header, or fb_api_req_friendly_name in the form body -
+   * and its doc_id. Every GraphQL request shares one path, so without these
+   * a message fetch and a profile-picture fetch look the same. Both name
+   * the query, not the person: they are the same for every account. The
+   * variables, which can hold thread ids, are not recorded.
+   */
+  op?: string;
+  docId?: string;
   /** The query keys the page used, so ours can be compared with theirs. */
   query: Record<string, string>;
   status: number;
@@ -60,6 +70,12 @@ export type Observation = {
   /** The oldest message in the payload, which says how far back it reaches. */
   oldest: string | null;
   newest: string | null;
+  /**
+   * For GraphQL: the field names on the way down from `data`, two levels
+   * deep. Schema, not content - enough to recognise a message-shaped
+   * response when the query name alone does not give it away.
+   */
+  shape?: string[];
   note?: string;
 };
 
@@ -133,13 +149,16 @@ async function record(response: Response) {
   if (fetchingInPage()) return;
 
   const parsed = new URL(url);
+  const isGraphQL = /graphql/.test(parsed.pathname);
   const entry: Observation = {
     at: new Date().toISOString(),
     kind: DIRECT_API.test(url) && parsed.pathname.includes("/inbox/")
       ? "inbox"
       : DIRECT_API.test(url) && parsed.pathname.includes("/threads/")
         ? "thread"
-        : "other",
+        : isGraphQL
+          ? "graphql"
+          : "other",
     path: parsed.pathname.replace(/\/threads\/[^/]+/, "/threads/<id>"),
     // Keys and short values only. A long run of digits in a query string is an
     // identifier, and identifiers are the thing this is not writing down.
@@ -155,11 +174,14 @@ async function record(response: Response) {
     newest: null,
   };
 
+  if (isGraphQL) nameQuery(response, entry);
+
   try {
     const text = await response.text();
     entry.bodyRead = true;
     entry.bytes = text.length;
-    summarise(text, entry);
+    if (isGraphQL) summariseGraphQL(text, entry);
+    else summarise(text, entry);
   } catch (error) {
     // Expected sometimes: a navigation, a streamed body, the target closing.
     // Worth recording as a fact, because "can we read these at all" is half
@@ -217,13 +239,120 @@ function summarise(text: string, entry: Observation) {
   }
 }
 
+/** The query's name and doc_id, from the request that produced it. */
+function nameQuery(response: Response, entry: Observation) {
+  try {
+    const request = response.request();
+    const headers = request.headers();
+    const form = new URLSearchParams(request.postData() ?? "");
+    const op = headers["x-fb-friendly-name"] ?? form.get("fb_api_req_friendly_name") ?? form.get("query_name");
+    const docId = form.get("doc_id") ?? new URL(request.url()).searchParams.get("doc_id");
+    if (op) entry.op = op.slice(0, 120);
+    if (docId && /^\d{1,25}$/.test(docId)) entry.docId = docId;
+  } catch {
+    // A request that cannot be read is still a response worth counting.
+  }
+}
+
+/** Keys that hold one message, in the schemas seen so far and the likely ones. */
+const MESSAGE_KEY = /^(message_id|messageId|mid|item_id|offline_threading_id)$/;
+/** Keys that hold a time, and the units they are likely in. */
+const TIME_KEY = /^(timestamp|timestamp_ms|timestamp_precise|created_at|sent_at)$/;
+
+/**
+ * The GraphQL version of summarise: count what looks like a message, find
+ * the newest and oldest times, note the shape. Values are read only to count
+ * them and to turn times into dates; nothing else from the body is kept.
+ *
+ * Bodies can be several JSON documents in a row, and can start with a
+ * for (;;); guard, so each line is tried on its own.
+ */
+function summariseGraphQL(text: string, entry: Observation) {
+  const documents: unknown[] = [];
+  for (const line of text.replace(/^for \(;;\);/, "").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      documents.push(JSON.parse(trimmed));
+    } catch {
+      // A line that is not JSON is skipped; a body with none is noted below.
+    }
+  }
+  if (documents.length === 0) {
+    entry.note = "not JSON";
+    return;
+  }
+
+  const stamps: number[] = [];
+  let messages = 0;
+  const walk = (node: unknown, depth: number) => {
+    if (depth > 40 || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, depth + 1);
+      return;
+    }
+    let isMessage = false;
+    for (const [key, value] of Object.entries(node)) {
+      if (MESSAGE_KEY.test(key) && (typeof value === "string" || typeof value === "number")) isMessage = true;
+      if (TIME_KEY.test(key)) {
+        const at = toMillis(value);
+        if (at !== null) stamps.push(at);
+      }
+      walk(value, depth + 1);
+    }
+    if (isMessage) messages += 1;
+  };
+
+  // Some responses key objects by id rather than by field name, and an id is
+  // exactly what this does not write down.
+  const schemaKeys = (keys: string[]) => keys.filter((k) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k));
+  const shape = new Set<string>();
+  for (const document of documents) {
+    walk(document, 0);
+    const data = (document as { data?: unknown })?.data;
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      for (const key of schemaKeys(Object.keys(data))) {
+        const value = (data as Record<string, unknown>)[key];
+        const below = value && typeof value === "object" && !Array.isArray(value)
+          ? schemaKeys(Object.keys(value)).slice(0, 6).join(",")
+          : "";
+        shape.add(below ? `${key}{${below}}` : key);
+      }
+    }
+  }
+
+  entry.messages = messages;
+  if (shape.size) entry.shape = [...shape].slice(0, 6);
+  // Times far in the past or future are some other number with a time-like
+  // name; a message lands within a few years of now.
+  const plausible = stamps.filter((t) => t > Date.parse("2010-01-01") && t < Date.now() + 86_400_000);
+  if (plausible.length) {
+    entry.oldest = new Date(Math.min(...plausible)).toISOString();
+    entry.newest = new Date(Math.max(...plausible)).toISOString();
+  }
+}
+
+/** Seconds, milliseconds or microseconds, as milliseconds. */
+function toMillis(value: unknown): number | null {
+  const n = typeof value === "string" ? Number(value) : typeof value === "number" ? value : NaN;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n > 1e14) return n / 1000; // microseconds
+  if (n > 1e11) return n; // milliseconds
+  return n * 1000; // seconds
+}
+
 function push(entry: Observation) {
   log.push(entry);
   if (log.length > KEEP) log.shift();
+  // Timestamped, unlike the rest of the log, because the whole point of these
+  // lines is to be lined up against a message arriving and a sync starting.
+  const named = entry.kind === "graphql"
+    ? `op=${entry.op ?? "?"} doc=${entry.docId ?? "?"} shape=${(entry.shape ?? []).join(";") || "-"} `
+    : "";
   console.log(
-    `[observe] ${entry.kind} ${entry.status} ` +
+    `[observe] ${entry.at} ${entry.kind} ${entry.status} ${named}` +
       `threads=${entry.threads ?? "?"} messages=${entry.messages ?? "?"} ` +
-      `back to ${entry.oldest ?? "?"} ` +
+      `newest ${entry.newest ?? "?"} back to ${entry.oldest ?? "?"} ` +
       `${entry.bodyRead ? `${entry.bytes}B` : entry.note ?? "no body"} ` +
       `query=${JSON.stringify(entry.query)}`,
   );

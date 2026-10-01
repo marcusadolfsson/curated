@@ -61,8 +61,8 @@ designated => identifier "com.curated.app" and anchor apple generic
               and certificate leaf[subject.CN] = "Apple Development: ..."
 ```
 
-which is byte-for-byte identical after a rebuild. The signature is timestamped,
-so it stays valid once the signing certificate eventually expires.
+which is byte-for-byte identical after a rebuild. A Developer ID build is also
+timestamped, so it stays valid once the signing certificate eventually expires.
 
 Autostart depends on this directly now. The login item is registered by the app
 itself through `SMAppService`, and macOS tracks it by bundle identity rather
@@ -72,7 +72,32 @@ renaming the bundle harmless, and what puts a single entry in System Settings
 rather than one per build.
 
 Handing the app to anyone else is a separate problem and needs Developer ID plus
-notarisation.
+notarisation, which is what a release is.
+
+## Releases
+
+```bash
+make standalone   # the whole app
+make smoke        # boots its server from a temp dir, with throwaway data
+make dmg          # dist/Curated.dmg, drag-to-Applications
+make notarize     # all of the above, then notarize and staple both
+```
+
+Apple Silicon only. The server carries native code - Node, better-sqlite3,
+sharp, the Agent SDK's `claude` - built for the machine that runs the build, so
+an Intel build would need a second copy of every piece of it.
+
+`make notarize` refuses to start without a Developer ID Application identity,
+and reads notarization credentials from a `notarytool` keychain profile named
+`curated`. Releases are normally built by
+`.github/workflows/menubar-release.yml`: push a `menubar-v*` tag and it builds,
+smoke-tests, notarizes and publishes the DMG as a GitHub release. Run it by
+hand to get the DMG as an artifact without publishing anything.
+
+A release build has a different signature from one made here with an Apple
+Development certificate, and macOS keys the login item on it. After switching
+between the two, if Start at login stops working, turn it off and on again from
+the menu.
 
 ## What it shows
 

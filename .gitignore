@@ -56,3 +56,9 @@ next-env.d.ts
 
 # the downloaded Node runtime, cached for the app bundle
 /.cache
+
+# the private repo, cloned inside this one, and what is linked in from it
+/.private/
+/CLAUDE.md
+/CLAUDE.local.md
+.claude/skills

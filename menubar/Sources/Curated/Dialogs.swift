@@ -37,15 +37,11 @@ enum Dialogs {
     /// A one-field question. Plain text rather than secure: what goes in here
     /// is pasted, not typed from memory, and a row of dots makes a mispaste
     /// impossible to see.
-    /// `remove` adds a third, destructive button - for a value that can be
-    /// taken away as well as replaced.
     static func prompt(
         _ title: String,
         message: String,
         placeholder: String,
         action: String,
-        removeTitle: String? = nil,
-        remove: (() -> Void)? = nil,
         then: @escaping (String) -> Void
     ) {
         present {
@@ -54,23 +50,15 @@ enum Dialogs {
             alert.informativeText = message
             alert.addButton(withTitle: action)
             alert.addButton(withTitle: "Cancel")
-            if let removeTitle {
-                alert.addButton(withTitle: removeTitle).hasDestructiveAction = true
-            }
 
             let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
             field.placeholderString = placeholder
             alert.accessoryView = field
             alert.window.initialFirstResponder = field
 
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
+            if alert.runModal() == .alertFirstButtonReturn {
                 let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !value.isEmpty { then(value) }
-            case .alertThirdButtonReturn:
-                remove?()
-            default:
-                break
             }
         }
     }
@@ -92,15 +80,34 @@ enum Dialogs {
     /// because "the tab closed" or "it opened behind everything" is the usual
     /// reason somebody has no code to paste - and that should not cost them
     /// the whole sign-in.
+    ///
+    /// `closeWhen` is checked twice a second while the dialog is up, and
+    /// closes it without an answer when it turns true; `closed` then runs in
+    /// place of `then` or `cancel`. For when the thing being waited on can
+    /// arrive some other way than through the text field.
     static func codePrompt(
         _ title: String,
         message: String,
         placeholder: String,
         reopen: @escaping () -> Void,
         cancel: @escaping () -> Void,
+        closeWhen: (() -> Bool)? = nil,
+        closed: (() -> Void)? = nil,
         then: @escaping (String) -> Void
     ) {
         present {
+            // A modal alert runs its own run loop mode, so the check has to be
+            // scheduled in that mode or it never fires while the alert is up.
+            var watch: Timer?
+            if let closeWhen {
+                let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
+                    if closeWhen() { NSApp.stopModal(withCode: .abort) }
+                }
+                RunLoop.main.add(timer, forMode: .modalPanel)
+                watch = timer
+            }
+            defer { watch?.invalidate() }
+
             while true {
                 let alert = NSAlert()
                 alert.messageText = title
@@ -123,6 +130,9 @@ enum Dialogs {
                 case .alertThirdButtonReturn:
                     reopen()
                     continue
+                case .abort where closeWhen?() == true:
+                    closed?()
+                    return
                 default:
                     cancel()
                     return

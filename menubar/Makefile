@@ -1,7 +1,6 @@
 APP      := Curated
 BUNDLE   := $(APP).app
 CONFIG   := release
-BIN      := .build/$(CONFIG)/$(APP)
 INSTALL  := /Applications
 AGENT    := com.curated.app
 PLIST    := $(HOME)/Library/LaunchAgents/$(AGENT).plist
@@ -22,7 +21,27 @@ SIGN_ID := $(shell security find-identity -v -p codesigning 2>/dev/null | \
              awk -F'"' '/Apple Development/{print $$2; exit}')
 endif
 
-.PHONY: all build app standalone sign copy run install install-standalone uninstall clean
+## A secure timestamp is what notarization asks for, and it costs a round trip
+## to Apple per signature, so only a Developer ID build pays for it.
+TIMESTAMP := $(if $(findstring Developer ID Application,$(SIGN_ID)),--timestamp,)
+
+## Apple Silicon only. The server carries native code - Node, better-sqlite3,
+## sharp, the Agent SDK's claude - built for the machine that runs the build,
+## and an Intel build would mean a second copy of every piece of it.
+BIN      := .build/$(CONFIG)/$(APP)
+
+## Releases. Notarization credentials come from a notarytool keychain profile,
+## created once with
+##   xcrun notarytool store-credentials curated --apple-id <id> --team-id ZP8TR4ZYDR --password <app-specific>
+## CI passes Apple ID arguments instead (.github/workflows/menubar-release.yml).
+## No secret lives here.
+NOTARY_PROFILE ?= curated
+NOTARY_AUTH ?= --keychain-profile "$(NOTARY_PROFILE)"
+DIST     := dist
+DIST_ZIP := $(DIST)/Curated.zip
+DMG      := $(DIST)/Curated.dmg
+
+.PHONY: all build app standalone sign copy run install install-standalone uninstall clean dmg notarize smoke
 
 all: app
 
@@ -71,17 +90,22 @@ standalone: build
 ## bundle it happens to sit in. Without them node dies on the first native
 ## require with SIGTRAP and prints nothing at all, which is a memorable
 ## afternoon.
+## The Agent SDK's claude binaries are left as they come: Anthropic signs them
+## with its own Developer ID, hardened runtime and a timestamp, which is what
+## notarization asks of nested code, and re-signing them would only replace a
+## signature that already vouches for them.
 sign:
-	@if [ -n '$(SIGN_ID)' ]; then \
+	@set -e; if [ -n '$(SIGN_ID)' ]; then \
 	  echo "Signing as: $(SIGN_ID)"; \
 	  find $(BUNDLE)/Contents/Resources -type f \( -name '*.node' -o -name '*.dylib' \) \
-	    -exec codesign --force --options runtime --sign '$(SIGN_ID)' {} + 2>/dev/null; \
+	    -exec codesign --force --options runtime $(TIMESTAMP) --sign '$(SIGN_ID)' {} + ; \
 	  if [ -f $(BUNDLE)/Contents/Resources/node/bin/node ]; then \
-	    codesign --force --options runtime --entitlements Resources/Curated.entitlements \
+	    codesign --force --options runtime $(TIMESTAMP) --entitlements Resources/Curated.entitlements \
 	      --sign '$(SIGN_ID)' $(BUNDLE)/Contents/Resources/node/bin/node; \
 	  fi; \
-	  codesign --force --options runtime --entitlements Resources/Curated.entitlements \
+	  codesign --force --options runtime $(TIMESTAMP) --entitlements Resources/Curated.entitlements \
 	    --sign '$(SIGN_ID)' $(BUNDLE); \
+	  codesign --verify --strict --deep $(BUNDLE); \
 	else \
 	  echo "No signing identity found. Signing ad-hoc, which means the app's"; \
 	  echo "identity changes on every build. Fine to run, but macOS will treat"; \
@@ -90,6 +114,54 @@ sign:
 	fi
 	@echo "Built $(BUNDLE)"
 	@codesign -d -r- $(BUNDLE) 2>&1 | sed -n 's/^designated => /Requirement: /p'
+
+## A drag-to-Applications disk image of whatever $(BUNDLE) was last built.
+dmg:
+	@test -d $(BUNDLE) || { echo "Build the app first (make standalone)"; exit 1; }
+	rm -rf $(DIST)/dmg-root $(DMG)
+	mkdir -p $(DIST)/dmg-root
+	cp -R $(BUNDLE) $(DIST)/dmg-root/
+	ln -s /Applications $(DIST)/dmg-root/Applications
+	hdiutil create -volname "$(APP)" -srcfolder $(DIST)/dmg-root -fs HFS+ -format UDZO -ov $(DMG)
+	rm -rf $(DIST)/dmg-root
+	codesign --force $(TIMESTAMP) --sign '$(SIGN_ID)' $(DMG)
+	@echo "Built $(DMG) ($$(du -sh $(DMG) | cut -f1))"
+
+## The release: Developer ID signed, notarized, stapled - the app
+## first, so its ticket is stapled inside the image, then the image around it,
+## so it installs cleanly offline.
+##
+## The identity is checked before anything is built, because the build takes
+## minutes and an Apple Development signature would only fail at the end.
+notarize:
+	@case '$(SIGN_ID)' in "Developer ID Application"*) ;; \
+	  *) echo "Notarization needs a Developer ID Application certificate; signing identity is: '$(SIGN_ID)'"; exit 1;; esac
+	@xcrun notarytool history $(NOTARY_AUTH) >/dev/null 2>&1 || { \
+	  echo "Notarization credentials not usable. Create the profile once with:"; \
+	  echo "  xcrun notarytool store-credentials $(NOTARY_PROFILE) --apple-id <APPLE_ID> --team-id ZP8TR4ZYDR --password <app-specific password>"; \
+	  exit 1; }
+	$(MAKE) standalone
+	$(MAKE) smoke
+	mkdir -p $(DIST)
+	rm -f $(DIST_ZIP)
+	ditto -c -k --keepParent $(BUNDLE) $(DIST_ZIP)
+	xcrun notarytool submit $(DIST_ZIP) $(NOTARY_AUTH) --wait
+	xcrun stapler staple $(BUNDLE)
+	rm -f $(DIST_ZIP)
+	$(MAKE) dmg
+	xcrun notarytool submit $(DMG) $(NOTARY_AUTH) --wait
+	xcrun stapler staple $(DMG)
+	xcrun stapler validate $(DMG)
+	spctl --assess --type open --context context:primary-signature --verbose=2 $(DMG)
+	spctl --assess --type execute --verbose=2 $(BUNDLE)
+	@echo "Notarized: $(DMG)"
+
+## Boots the server exactly as it sits in the built app - its own node, its own
+## modules - from a temporary directory with a throwaway database.
+smoke:
+	@test -d $(BUNDLE)/Contents/Resources/server || { echo "Build the app first (make standalone)"; exit 1; }
+	cd .. && NODE_BIN=$(CURDIR)/$(BUNDLE)/Contents/Resources/node/bin/node \
+	  ./scripts/smoke.sh $(CURDIR)/$(BUNDLE)/Contents/Resources/server
 
 run: app
 	open $(BUNDLE)
@@ -122,4 +194,4 @@ uninstall:
 	@echo "Removed. Check System Settings > General > Login Items if an entry lingers."
 
 clean:
-	rm -rf .build $(BUNDLE)
+	rm -rf .build $(BUNDLE) $(DIST)

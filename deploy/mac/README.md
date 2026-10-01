@@ -52,8 +52,8 @@ committed.
 install:
 
 ```bash
-sed "s|REPO|$HOME/curated|g" deploy/mac/com.curated.plist \
-  > ~/Library/LaunchAgents/com.curated.plist
+sed -e "s|REPO|$HOME/curated|g" -e "s|HOME/Library|$HOME/Library|g" \
+  deploy/mac/com.curated.plist > ~/Library/LaunchAgents/com.curated.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.curated.plist
 ```
 
@@ -64,7 +64,8 @@ launchctl bootout gui/$(id -u)/com.curated.app
 ```
 
 It is supervised with `KeepAlive`, so a crash restarts it. `ThrottleInterval`
-keeps a boot loop from hammering Instagram. Logs go to `data/curated.log`.
+keeps a boot loop from hammering Instagram. Logs go to
+`~/Library/Application Support/Curated/curated.log`, beside the data.
 
 Deploying a change means stopping it, building, and starting it again, in that
 order. Building over a running `next start` overwrites the directory it is

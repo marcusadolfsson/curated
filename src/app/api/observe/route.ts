@@ -17,6 +17,19 @@ export async function GET() {
   const threads = observations.filter((o) => o.kind === "thread");
   const unreadable = observations.filter((o) => !o.bodyRead);
 
+  // Per GraphQL query: how often the page ran it, and whether it ever came
+  // back carrying messages. The query that fetches new messages, if there is
+  // one, is the row whose count rises when a message arrives.
+  const queries: Record<string, { count: number; withMessages: number; mostMessages: number; last: string }> = {};
+  for (const o of observations.filter((o) => o.kind === "graphql")) {
+    const key = o.op ?? (o.docId ? `doc ${o.docId}` : "unnamed");
+    const row = (queries[key] ??= { count: 0, withMessages: 0, mostMessages: 0, last: o.at });
+    row.count += 1;
+    if ((o.messages ?? 0) > 0) row.withMessages += 1;
+    row.mostMessages = Math.max(row.mostMessages, o.messages ?? 0);
+    if (o.at > row.last) row.last = o.at;
+  }
+
   return NextResponse.json({
     watching: (await getSetting("observePayloads")) === "true",
     seen: observations.length,
@@ -40,6 +53,7 @@ export async function GET() {
       /** Whether the page asks for messages inline, as fetchInbox does. */
       usesThreadMessageLimit: inbox.some((o) => "thread_message_limit" in o.query),
     },
+    queries,
     observations,
   });
 }

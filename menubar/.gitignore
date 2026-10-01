@@ -2,3 +2,4 @@
 .swiftpm/
 Curated.app/
 *.png
+dist/

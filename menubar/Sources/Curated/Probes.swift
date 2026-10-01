@@ -4,9 +4,11 @@ import Foundation
 
 struct Config {
     var localBase = URL(string: "http://127.0.0.1:3000")!
-    /// The public hostname the app is served on. Set yours with:
+    /// The hostname the app is served on from outside, if it is. Not built
+    /// in, because it is somebody's own domain:
     ///   defaults write com.curated.app publicURL https://curated.example.com
-    var publicURL = URL(string: "https://curated.example.com")!
+    /// Without it there is no public check and no Public row.
+    var publicURL: URL?
     /// Pinned metrics port, or nil to discover it from the running process.
     var metricsPort: Int?
 
@@ -139,11 +141,6 @@ struct CuratedAPI {
             body: try JSONSerialization.data(withJSONObject: ["token": token]),
             as: ClaudeTokenPayload.self
         )
-    }
-
-    @discardableResult
-    func clearClaudeToken() async throws -> ClaudeTokenPayload {
-        try await write("api/claude/token", method: "DELETE", body: nil, as: ClaudeTokenPayload.self)
     }
 
     private func write<T: Decodable>(
