@@ -222,22 +222,24 @@ out. Intended for occasional use (a few lookups a day), not tight loops.
 cd ~/workspace/instagram-api
 ./manage.sh status    # is it running? includes /health check + tunnel state
 ./manage.sh start     # start in background
-./manage.sh stop      # stop API and tunnel
-./manage.sh restart   # restart
+./manage.sh stop      # stop the API only (tunnel is separate: mac-tunnel.sh stop)
+./manage.sh restart   # restart the API only; the tunnel stays up
 ./manage.sh logs      # last 50 lines of server.log (add a number for more)
 ```
 
 You can also just ask me in chat — "is the API running?" — and I'll check.
-If the machine reboots, neither the API nor the tunnel auto-starts, but both
-self-heal within minutes via their watcher crons (see below) — no manual
-restart needed.
+If the machine (or the whole VM) goes away, neither the API nor the tunnel
+auto-starts, but both self-heal within about a minute via their watcher crons
+(see below) — no manual restart needed. The runtime recovers saved cron jobs
+across VM replacements, so the watchers are the auto-start mechanism.
 
 Two scheduled supervisors keep the service alive:
 
-- `api-health-watch` (every 5 min) curls `/health` and restarts the API via
+- `api-health-watch` (every 1 min) curls `/health` and restarts the API via
   `./manage.sh restart` if it stops responding, so a silent death under
-  memory pressure gets recovered automatically. It never touches the tunnel.
-- `tunnel-health-watch` (every 2 min) restarts the tunnel supervisor via
+  memory pressure (or a VM replacement) gets recovered automatically.
+  `manage.sh` never touches the tunnel.
+- `tunnel-health-watch` (every 1 min) restarts the tunnel supervisor via
   `./mac-tunnel.sh start` if it is fully dead. It never touches the API.
 
 The tunnel supervisor itself retries a dropped SSH connection every 10s, so
