@@ -23,9 +23,12 @@ import type { TravelPost } from "@/app/api/travel/route";
 export default function TravelMap({
   posts,
   onOpen,
+  onSelect,
 }: {
   posts: TravelPost[];
   onOpen: (post: TravelPost) => void;
+  /** A circle was tapped: the posts inside it, to list under the map. */
+  onSelect: (posts: TravelPost[]) => void;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<LeafletMap | null>(null);
@@ -33,6 +36,10 @@ export default function TravelMap({
   // The latest handler, so markers made once still open the right thing.
   const open = useRef(onOpen);
   open.current = onOpen;
+  const select = useRef(onSelect);
+  select.current = onSelect;
+  /** Which post each marker stands for, so a circle can say what is in it. */
+  const postOf = useRef(new WeakMap<object, TravelPost>());
 
   // The map itself, once. Leaflet reaches for window, so it is loaded here
   // rather than at the top, where it would run during server rendering.
@@ -73,7 +80,10 @@ export default function TravelMap({
 
       cluster.current = L.markerClusterGroup({
         showCoverageOnHover: false,
-        spiderfyOnMaxZoom: true,
+        // A tap on a circle lists what is in it, and zooms in as well - also
+        // at the closest zoom, where posts at one spot used to fan out.
+        zoomToBoundsOnClick: false,
+        spiderfyOnMaxZoom: false,
         maxClusterRadius: 48,
         iconCreateFunction: (group) => {
           const count = group.getChildCount();
@@ -85,6 +95,18 @@ export default function TravelMap({
           });
         },
       }).addTo(instance);
+
+      cluster.current.on("clusterclick", (event) => {
+        const group = (event as unknown as { layer: import("leaflet").MarkerCluster }).layer;
+        const inside = group
+          .getAllChildMarkers()
+          .map((marker) => postOf.current.get(marker))
+          .filter((post): post is TravelPost => Boolean(post));
+        select.current(inside);
+        if (instance.getZoom() < instance.getMaxZoom()) {
+          instance.fitBounds(group.getBounds(), { padding: [32, 32], maxZoom: instance.getMaxZoom() });
+        }
+      });
 
       map.current = instance;
       draw(L);
@@ -121,6 +143,7 @@ export default function TravelMap({
       });
       marker.bindTooltip(escape(post.city ?? post.place ?? post.region), { direction: "top", offset: [0, -8] });
       marker.on("click", () => open.current(post));
+      postOf.current.set(marker, post);
       group.addLayer(marker);
     }
 
@@ -136,7 +159,7 @@ export default function TravelMap({
   return (
     <div
       ref={element}
-      className="travel-map h-[280px] w-full overflow-hidden rounded-xl ring-1 ring-line sm:h-[380px]"
+      className="travel-map h-[280px] w-full overflow-hidden rounded-xl ring-1 ring-line sm:h-[380px] [&_.travel-cluster]:cursor-pointer"
       aria-label="Map of travel posts"
     />
   );
