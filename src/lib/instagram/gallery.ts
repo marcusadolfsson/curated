@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MEDIA_DIR, ensureDirs } from "@/lib/paths";
-import { usingApi } from "./api";
+import { postVideo, usingApi } from "./api";
 import { igFetch, igJson } from "./tab";
 
 /**
@@ -105,6 +105,27 @@ export async function fetchGallery(shortcode: string, mediaId: string): Promise<
  */
 export async function fetchVideo(shortcode: string, mediaId: string): Promise<GalleryVideo | null> {
   ensureDirs();
+
+  // Through the API: it finds the video without the account, and the file
+  // comes straight off the CDN - signed for whoever holds the link, so no
+  // browser and no cookies. Saved under the same name as before, so the
+  // viewer and the pruning neither know nor care which way it came.
+  if (await usingApi()) {
+    const file = `${shortcode}.mp4`;
+    const target = path.join(MEDIA_DIR, file);
+    if (!fs.existsSync(target)) {
+      const url = await postVideo(`https://www.instagram.com/reel/${shortcode}/`);
+      if (!url) return null;
+      const response = await fetch(url, { signal: AbortSignal.timeout(180_000) }).catch(() => null);
+      if (!response?.ok) return null;
+      const body = Buffer.from(await response.arrayBuffer());
+      if (body.length === 0) return null;
+      // Written whole or not at all: a half-written file would read as cached.
+      await fs.promises.writeFile(`${target}.part`, body);
+      await fs.promises.rename(`${target}.part`, target);
+    }
+    return { file, width: 0, height: 0, duration: 0 };
+  }
 
   const item = await fetchMediaInfo(mediaId);
   const versions = item?.video_versions ?? [];

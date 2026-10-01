@@ -19,7 +19,7 @@ import {
   type DmUser,
   type Json,
 } from "@/lib/instagram/dm";
-import { ApiUnavailableError } from "@/lib/instagram/api";
+import { ApiUnavailableError, usingApi } from "@/lib/instagram/api";
 import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
@@ -347,11 +347,12 @@ async function prefetchVideos(postIds: number[]) {
 
   for (const [index, post] of reels.entries()) {
     const mediaId = post.mediaId ?? mediaIdFromShortcode(post.shortcode);
-    if (!mediaId) continue;
+    // Through the API the video is found by link, so no media id is needed.
+    if (!mediaId && !(await usingApi())) continue;
     if (index > 0) await pause(2_000, 6_000);
     state.message = `Fetching the reel (${index + 1} of ${reels.length})`;
     try {
-      const video = await fetchVideo(post.shortcode, mediaId);
+      const video = await fetchVideo(post.shortcode, mediaId ?? "");
       if (video) await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
     } catch (error) {
       if (

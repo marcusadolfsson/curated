@@ -34,10 +34,20 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     if (videoIsCached(post.videoFile)) {
       return NextResponse.json({ video: `/api/media/${post.videoFile}`, images: [] });
     }
-    // Through the API there is no video file to be had, and the embed will
-    // not play a reel. Said plainly, so the viewer can show the cover and a
-    // way out rather than a failure.
+    // Through the API the video comes by link, not media id, so it is asked
+    // for whatever the post carries. When there is none to be had - a photo
+    // mislabelled, a video Instagram withholds - the viewer shows the cover
+    // and a way out rather than a failure.
     if (await usingApi()) {
+      try {
+        const video = await fetchVideo(post.shortcode, mediaId ?? "");
+        if (video) {
+          await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
+          return NextResponse.json({ video: `/api/media/${video.file}`, images: [] });
+        }
+      } catch (error) {
+        console.error(`[gallery] could not fetch the video for ${post.shortcode}:`, error);
+      }
       return NextResponse.json({ video: null, images: [], reason: "api" });
     }
     if (mediaId) {
