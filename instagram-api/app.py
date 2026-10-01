@@ -327,7 +327,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.4.0",
+    version="1.5.0",
     lifespan=lifespan,
 )
 
@@ -941,6 +941,194 @@ def get_post_video(
         "url": target,
         "video_url": video_url,
         "cached": False,
+    }
+
+
+# --------------------------------------------------------------------------
+# Carousel / photo image URLs (GET /posts/images)
+#
+# yt-dlp resolves reels to video but ignores photo entries. The same logged-out
+# GraphQL post query it uses (PolarisLoggedOutDesktopWWWPostRootContentQuery)
+# returns every carousel child with full image_versions2 data, so
+# extract_post_json.py reuses yt-dlp's extractor machinery to capture the raw
+# product_info and we pick the largest image per entry here. Intended for
+# occasional use (a few lookups a day) — not tight loops.
+#
+# NOTE: this route is registered before /posts/{media_id} so that "images"
+# is not captured as a media_id.
+
+IMAGE_CACHE_TTL = 6 * 3600   # 6h; CDN URLs are signed and expire
+IMAGE_CACHE_MAX = 200
+
+
+def _image_cache_path() -> Path:
+    return AGENT_MSGS_DIR / "image_cache.json"
+
+
+def _json_cache_get(path: Path, key: str, ttl: int) -> Optional[Any]:
+    try:
+        cache = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    entry = cache.get(key)
+    if not isinstance(entry, dict):
+        return None
+    try:
+        fresh = time.time() - entry["fetched_at"] < ttl
+    except (KeyError, TypeError):
+        return None
+    value = entry.get("value")
+    return value if fresh else None
+
+
+def _json_cache_set(path: Path, key: str, value: Any, max_entries: int) -> None:
+    try:
+        cache = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[key] = {"fetched_at": time.time(), "value": value}
+    if len(cache) > max_entries:
+        for old in sorted(cache, key=lambda k: cache[k].get("fetched_at", 0))[
+            : len(cache) - max_entries
+        ]:
+            del cache[old]
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache))
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def _extract_post_json(page_url: str) -> dict:
+    """Raw logged-out post JSON via yt-dlp's extractor internals.
+
+    Raises HTTPException(504/502) when extraction itself fails.
+    """
+    try:
+        proc = subprocess.run(
+            ["python3", str(BASE_DIR / "extract_post_json.py"), page_url],
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status_code=504, detail="Post lookup timed out"
+        ) from exc
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip().splitlines()
+        detail = err[-1][:200] if err else "post lookup failed"
+        raise HTTPException(
+            status_code=502, detail=f"Post lookup failed: {detail}"
+        )
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502, detail="Post lookup returned bad JSON"
+        ) from exc
+
+
+def _largest_image(media: dict) -> Optional[dict]:
+    """Largest image candidate for a photo media dict.
+
+    Returns {"url", "width", "height"} or None. Candidate size is read from
+    the stp query param (s{width}x{height}); the candidate without a size
+    marker is the full-size original.
+    """
+    ow, oh = media.get("original_width"), media.get("original_height")
+    best: Optional[dict] = None
+    best_area = 0
+    candidates = (media.get("image_versions2") or {}).get("candidates") or []
+    for cand in candidates:
+        url = cand.get("url")
+        if not url:
+            continue
+        stp = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get(
+            "stp", [""]
+        )[0]
+        m = re.search(r"s(\d+)x(\d+)", stp)
+        if m:
+            w, h = int(m.group(1)), int(m.group(2))
+        else:
+            w, h = ow, oh
+        area = (w or 0) * (h or 0)
+        if area > best_area:
+            best = {"url": url, "width": w, "height": h}
+            best_area = area
+    if best:
+        return best
+    fallback = media.get("display_uri")
+    if fallback:
+        return {"url": fallback, "width": ow, "height": oh}
+    return None
+
+
+@app.get("/posts/images", tags=["posts"], dependencies=[Depends(require_api_key)])
+def get_post_images(
+    url: str = Query(..., description="Instagram /p/<code>/ or /reel/<code>/ share URL"),
+) -> dict:
+    """Every image for a shared post / carousel / reel, largest CDN URLs.
+
+    Carousel entries come back in order; a single-photo post returns one
+    item; a reel returns one video item (same URL the /posts/video endpoint
+    would give). Image and video CDN URLs are short-lived — download them
+    promptly and re-request if they go stale. Results are cached 6h per
+    shortcode. Intended for occasional use (a few lookups a day), not tight
+    loops.
+    """
+    kind, shortcode = _parse_share_url(url)
+    target = f"https://www.instagram.com/{kind}/{shortcode}/"
+    cached = _json_cache_get(_image_cache_path(), shortcode, IMAGE_CACHE_TTL)
+    if cached is not None:
+        return {
+            "shortcode": shortcode,
+            "url": target,
+            "cached": True,
+            "items": cached,
+        }
+    media = _extract_post_json(target)
+    children = media.get("carousel_media") or []
+    entries = children if children else [media]
+    items: List[dict] = []
+    for entry in entries:
+        if entry.get("media_type") == 2:  # video: reel or video carousel item
+            code = entry.get("code") or shortcode
+            video_url = _video_cache_get(code)
+            if video_url is None:
+                video_url = _extract_video_url(
+                    f"https://www.instagram.com/p/{code}/"
+                )
+                if video_url:
+                    _video_cache_set(code, video_url)
+            if not video_url:
+                continue
+            items.append(
+                {
+                    "type": "video",
+                    "url": video_url,
+                    "width": entry.get("original_width"),
+                    "height": entry.get("original_height"),
+                }
+            )
+        else:  # photo entry
+            img = _largest_image(entry)
+            if img:
+                items.append({"type": "image", **img})
+    if not items:
+        raise HTTPException(
+            status_code=422,
+            detail="No accessible media found (private post, or Instagram withheld it)",
+        )
+    _json_cache_set(_image_cache_path(), shortcode, items, IMAGE_CACHE_MAX)
+    return {
+        "shortcode": shortcode,
+        "url": target,
+        "cached": False,
+        "items": items,
     }
 
 
