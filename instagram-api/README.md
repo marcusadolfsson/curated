@@ -93,6 +93,7 @@ curl -s -H "X-API-Key: $KEY" \
 | GET | `/reels?limit=&since=&until=&sort_order=&after=` | Your reels |
 | GET | `/posts/{media_id}` | Single post — works for other accounts' posts too (see notes) |
 | GET | `/posts/by-url?url=` | Resolve a /p/ or /reel/ share URL to metadata (see below) |
+| GET | `/posts/video?url=` | Direct MP4 URL for a shared reel/video post (see below) |
 | GET | `/posts/{media_id}/comments?limit=&after=` | Comments |
 | GET | `/posts/{media_id}/likers?limit=&after=` | Likers |
 | GET | `/insights?start_time=&end_time=` | Account insights (unix seconds; professional accounts) |
@@ -149,6 +150,25 @@ Returns `source: "oembed"` plus `shortcode`, `url`, `media_id` (classic
 embed block, ready to render). Results are cached 24h per shortcode
 (`cached: true` on hits). Returns 404 if Instagram can't resolve the URL
 (deleted/private post) and 400 for non-Instagram or non-post URLs.
+
+## Direct video lookup (`GET /posts/video?url=<share_url>`)
+
+For reels/video posts shared in DMs — the provider lookup returns no video
+URLs. Resolves via yt-dlp (no login) to a short-lived MP4 CDN URL:
+
+```bash
+curl -s -H "X-API-Key: $KEY" \
+  "http://127.0.0.1:8000/posts/video?url=https://www.instagram.com/reel/Dd5HnKTu8Ar/"
+```
+
+Returns `shortcode`, `url`, `video_url`, and `cached`. The CDN URL expires —
+download it promptly and re-request if it goes stale. Results are cached 6h
+per shortcode (short TTL on purpose, since the URLs expire). Returns 400 for
+bad URLs, 422 when the post has no playable video (photo post, or Instagram
+withheld it), and 502/504 when extraction fails or times out. Intended for
+occasional use (a few lookups a day), not tight loops. Requires yt-dlp
+installed for the system python3 (`pip install yt-dlp`); the API venv does
+not need it.
 
 ## Managing the server
 
