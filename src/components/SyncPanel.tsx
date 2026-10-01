@@ -10,11 +10,24 @@ type SyncResponse = {
 
 /**
  * The manual check, off the front page. New posts arrive on their own - the
- * inbox tab hears them - so this is for when you want to be sure, not a
- * button to press every time you open the app.
+ * listener hears about new messages and reads them - so this is for when you
+ * want to be sure, not a button to press every time you open the app.
  */
 export default function SyncPanel() {
   const [data, setData] = useState<SyncResponse | null>(null);
+  /**
+   * Through the API: when it last asked Instagram. Later than the last sync
+   * whenever nothing has arrived since, because a sync only runs when
+   * something does - so it is the truer "last checked".
+   */
+  const [upstreamCheckedAt, setUpstreamCheckedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetch("/api/watch")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { upstreamCheckedAt?: string | null } | null) => setUpstreamCheckedAt(body?.upstreamCheckedAt ?? null))
+      .catch(() => undefined);
+  }, []);
 
   const load = () =>
     fetch("/api/sync")
@@ -48,8 +61,8 @@ export default function SyncPanel() {
     <section className="border-b border-line py-8">
       <h2 className="font-serif text-2xl">Checking for posts</h2>
       <p className="mt-1 max-w-[58ch] text-[14px] text-muted">
-        New posts arrive on their own while the inbox tab is listening, with a fallback look twice a
-        day. This is for when you want to be sure right now.
+        New posts arrive on their own: Curated hears about new messages as they come in and reads them
+        straight away. This is for when you want to be sure right now.
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-4 text-[14px]">
@@ -66,13 +79,22 @@ export default function SyncPanel() {
             ? state.message
             : state?.phase === "error"
               ? state.error
-              : last?.finishedAt
-                ? `Last checked ${new Date(last.finishedAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}${
-                    last.postsAdded > 0 ? `, ${last.postsAdded} new` : ", nothing new"
-                  }`
-                : ""}
+              : lastChecked(last ?? null, upstreamCheckedAt)}
         </span>
       </div>
     </section>
   );
+}
+
+/**
+ * The later of the last sync and the API's last look at Instagram. A sync
+ * says what it found; a later look found nothing, or a sync would have run.
+ */
+function lastChecked(last: SyncResponse["lastRun"], upstreamCheckedAt: string | null): string {
+  const synced = last?.finishedAt ? new Date(last.finishedAt) : null;
+  const looked = upstreamCheckedAt ? new Date(upstreamCheckedAt) : null;
+  const when = (at: Date) => at.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+  if (looked && (!synced || looked > synced)) return `Last checked ${when(looked)}, nothing new`;
+  if (synced && last) return `Last checked ${when(synced)}${last.postsAdded > 0 ? `, ${last.postsAdded} new` : ", nothing new"}`;
+  return "";
 }

@@ -50,7 +50,7 @@ export default function HeaderMenu({ className = "" }: { className?: string }) {
           {[
             ["/travel", "Travel", "Every place she has sent"],
             ["/report", "Report", "What arrives, and when"],
-            ["/setup", "Setup", "Sign in, and who to follow"],
+            ["/setup", "Setup", "Who to follow, and more"],
           ].map(([href, label, hint]) => (
             <Link
               key={href}

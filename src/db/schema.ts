@@ -85,6 +85,8 @@ export const posts = sqliteTable(
     // country. All three empty when the post is not about one place.
     place: text("place"),
     placeRegion: text("placeRegion"),
+    /** The town or city it is in or nearest to ("Ocala", "Saratoga"): what a folded line shows. */
+    placeCity: text("placeCity"),
     placeCountry: text("placeCountry"),
     /** When the post was last read for a place, found or not; null means not yet. */
     placedAt: integer("placedAt", { mode: "timestamp" }),

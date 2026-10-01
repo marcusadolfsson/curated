@@ -1,7 +1,7 @@
 /**
  * Runs once when the server starts. The realtime watcher has to be alive
  * before anyone opens the app, or the first post of the day waits for the
- * hourly timer.
+ * next manual check.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;

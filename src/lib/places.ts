@@ -24,6 +24,7 @@ const SYSTEM_PROMPT = `You place shared travel posts on a personal travel list. 
 
 - place: the most specific named spot the post is about - a hotel, restaurant, beach, trail, viewpoint or town - written as it would appear on a list, with its town when that helps ("Igludorf, Zermatt", "Hotel Yellowstone, Jackson Hole"). Null when the post is not about one location (a cruise ship's features, packing advice, an airline, a general announcement) or the spot cannot be identified.
 - region: the area this belongs to, at the level a person would plan a trip around and group a list by. That is a major city (Paris, New York City, Kyoto), a famous named area (Swiss Alps, Amalfi Coast, Banff National Park, Bali, Lake Como, the Dolomites), or - in the United States, Canada and Australia, when the place is not in a famous named area - the state or province (Colorado, Arizona, British Columbia). A town or a single site is a place, never a region: St. Moritz and Val d'Anniviers are places in the Swiss Alps; Estes Park and the Black Canyon of the Gunnison are places in Colorado. Several posts sharing a region is the point, so prefer the broader well-known area to a town.
+- city: the town or city the place is in, or nearest to - just its name ("Ocala", "Saratoga", "Charlotte Amalie", "Zermatt"). For a spot in a national park or the wilderness, the park or the nearest town a visitor would stay in. Null when place is null.
 - country: the country, its common English name ("United States", "Italy"). For a place in a US state or similar, the state belongs in the region or place, not here.
 
 Regions already on the list are given. When a post belongs to one of them, use that exact name; make a new region only when none fits.
@@ -40,10 +41,11 @@ const OUTPUT_SCHEMA = {
         properties: {
           id: { type: "integer" },
           place: { type: ["string", "null"] },
+          city: { type: ["string", "null"] },
           region: { type: ["string", "null"] },
           country: { type: ["string", "null"] },
         },
-        required: ["id", "place", "region", "country"],
+        required: ["id", "place", "city", "region", "country"],
         additionalProperties: false,
       },
     },
@@ -52,7 +54,7 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type Located = { id: number; place: string | null; region: string | null; country: string | null };
+type Located = { id: number; place: string | null; city: string | null; region: string | null; country: string | null };
 
 type LocateState = { running: boolean; done: number; total: number; error: string | null };
 const globalForPlaces = globalThis as unknown as { __places?: LocateState };
@@ -101,6 +103,7 @@ export async function locatePending(): Promise<{ placed: number; checked: number
           .update(posts)
           .set({
             place: clean(found.place),
+            placeCity: clean(found.city),
             placeRegion: region,
             placeCountry: clean(found.country),
             placedAt: new Date(),
@@ -112,6 +115,7 @@ export async function locatePending(): Promise<{ placed: number; checked: number
     }
     console.log(`[places] placed ${placed} of ${waiting.length} travel post(s)`);
     if (placed > 0) await consolidateRegions();
+    await fillCities();
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
     console.error("[places] stopped:", error);
@@ -223,6 +227,81 @@ export async function consolidateRegions(): Promise<number> {
     console.log(`[places] merged ${country ?? "(no country)"} > ${merge.from} into ${merge.into}`);
   }
   return applied;
+}
+
+const CITY_PROMPT = `For each place on a personal travel list, give the town or city it is in, or nearest to - just its name ("Ocala", "Saratoga", "Charlotte Amalie", "Zermatt"). For a spot in a national park or the wilderness, the park or the nearest town a visitor would stay in. Use the region, country and description to tell which. Null only when there is no telling.`;
+
+const CITY_SCHEMA = {
+  type: "object",
+  properties: {
+    posts: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { id: { type: "integer" }, city: { type: ["string", "null"] } },
+        required: ["id", "city"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["posts"],
+  additionalProperties: false,
+} as const;
+
+/**
+ * The city for places placed before the list kept one.
+ *
+ * Separate from placing, so the regions those posts were already filed under
+ * stay exactly as they are. Marked done either way, by an empty string when
+ * there is no telling, so a post is asked about once.
+ */
+export async function fillCities(): Promise<number> {
+  const waiting = await db
+    .select()
+    .from(posts)
+    .where(and(eq(posts.category, "Travel"), isNotNull(posts.place), isNull(posts.placeCity)));
+  if (waiting.length === 0) return 0;
+
+  const settings = await getSettings();
+  let filled = 0;
+  for (let start = 0; start < waiting.length; start += 40) {
+    const batch = waiting.slice(start, start + 40);
+    const input = batch.map((post) => ({
+      id: post.id,
+      place: post.place,
+      region: post.placeRegion,
+      country: post.placeCountry,
+      summary: post.summary,
+    }));
+    const stream = query({
+      prompt: `The places:\n${JSON.stringify(input, null, 1)}`,
+      options: {
+        model: settings.analysisModel || undefined,
+        effort: "low",
+        systemPrompt: { type: "custom", prompt: CITY_PROMPT },
+        tools: [],
+        settingSources: [],
+        persistSession: false,
+        env: agentEnv(),
+        maxTurns: 3,
+        outputFormat: { type: "json_schema", schema: CITY_SCHEMA as unknown as Record<string, unknown> },
+      },
+    });
+    let results: { id: number; city: string | null }[] = [];
+    for await (const message of stream) {
+      if (message.type !== "result" || message.subtype !== "success") continue;
+      results = (message.structured_output as { posts?: typeof results } | undefined)?.posts ?? [];
+    }
+    const byId = new Map(results.map((r) => [r.id, r.city]));
+    for (const post of batch) {
+      if (!byId.has(post.id)) continue;
+      const city = clean(byId.get(post.id));
+      await db.update(posts).set({ placeCity: city ?? "" }).where(eq(posts.id, post.id));
+      if (city) filled += 1;
+    }
+  }
+  console.log(`[places] cities for ${filled} of ${waiting.length} place(s)`);
+  return filled;
 }
 
 async function knownRegions(): Promise<string[]> {

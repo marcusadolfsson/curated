@@ -196,14 +196,10 @@ export default function Travel() {
               // with no country - holds the posts about it in general.
               const sameAsSection = region.region === country.country;
               const single = region.posts.length === 1 ? region.posts[0] : null;
-              // A place sent once is named by the place itself.
-              const label = sameAsSection
-                ? `Across ${region.region}`
-                : single?.place && !single.place.includes(region.region)
-                  ? single.place
-                  : region.region;
-              const detail =
-                single?.place && !sameAsSection && label === single.place ? region.region : null;
+              // A place sent once is named by its city, not the spot - the
+              // spot is in the post underneath, one tap away.
+              const label = sameAsSection ? `Across ${region.region}` : (single?.city ?? region.region);
+              const detail: string | null = null;
               const unread = region.posts.filter((post) => !post.viewed).length;
 
               return (

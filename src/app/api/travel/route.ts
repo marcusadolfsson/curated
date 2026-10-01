@@ -8,7 +8,7 @@ import { toPostView, type PostView } from "@/lib/serialize";
 
 export const dynamic = "force-dynamic";
 
-export type TravelPost = PostView & { place: string | null };
+export type TravelPost = PostView & { place: string | null; city: string | null };
 export type TravelRegion = { region: string; posts: TravelPost[] };
 export type TravelCountry = { country: string; count: number; regions: TravelRegion[] };
 
@@ -36,7 +36,7 @@ export async function GET() {
     const region = post.placeRegion as string;
     const regions = byCountry.get(country) ?? new Map<string, TravelPost[]>();
     const list = regions.get(region) ?? [];
-    list.push({ ...toPostView(post), place: post.place });
+    list.push({ ...toPostView(post), place: post.place, city: post.placeCity || null });
     regions.set(region, list);
     byCountry.set(country, regions);
   }
