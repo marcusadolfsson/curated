@@ -327,7 +327,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.5.0",
+    version="1.6.0",
     lifespan=lifespan,
 )
 
@@ -542,6 +542,167 @@ def dm_react(req: ReactRequest) -> Any:
         "--message-id", req.message_id,
         "--emoji", req.emoji,
     )
+
+
+# --------------------------------------------------------------------------
+# Outbound queue (POST /dms/react/queue, POST /dms/send/queue, GET /dms/queue)
+#
+# Enqueue-only endpoints: they validate and append to
+# agent_msgs/outbound_queue.json, then return immediately. No CLI call happens
+# here, so enqueueing never triggers an approval card and never blocks.
+# A scheduled task (`outbound-queue-sender`, every 30s) drains the queue by
+# running drain_outbound_queue.py, which invokes the CLIs directly; that task
+# carries the standing Allow for sending.
+#
+# Narrowing: queued reactions are limited to the Curated emoji set and to the
+# threads in REACT_QUEUE_THREADS (comma-separated thread_fbids in .env).
+# Queued sends are text-only DMs to a thread (no attachments in v1).
+
+REACT_QUEUE_EMOJI = {"❤️", "😍", "🤤", "🔥", "👏", "💡", "😂", "😮", "👍"}
+REACT_QUEUE_THREADS = {
+    t.strip()
+    for t in os.environ.get("REACT_QUEUE_THREADS", "").split(",")
+    if t.strip()
+}
+OUTBOUND_QUEUE_MAX = 200
+
+
+def _outbound_queue_path() -> Path:
+    return AGENT_MSGS_DIR / "outbound_queue.json"
+
+
+def _queue_modify(fn) -> Any:
+    """Run fn(items) -> result under an exclusive lock on the queue file."""
+    import fcntl
+
+    path = _outbound_queue_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            fh.seek(0)
+            raw = fh.read()
+            try:
+                items = json.loads(raw) if raw.strip() else []
+            except json.JSONDecodeError:
+                items = []
+            if not isinstance(items, list):
+                items = []
+            result = fn(items)
+            if len(items) > OUTBOUND_QUEUE_MAX:
+                items = items[-OUTBOUND_QUEUE_MAX:]
+            fh.seek(0)
+            fh.truncate()
+            fh.write(json.dumps(items))
+            return result
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _queue_read() -> List[dict]:
+    import fcntl
+
+    path = _outbound_queue_path()
+    if not path.exists():
+        return []
+    with open(path, "r") as fh:
+        fcntl.flock(fh, fcntl.LOCK_SH)
+        try:
+            items = json.loads(fh.read() or "[]")
+        except json.JSONDecodeError:
+            return []
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    return items if isinstance(items, list) else []
+
+
+class SendQueueRequest(BaseModel):
+    thread_fbid: str
+    text: str
+
+
+@app.post("/dms/react/queue", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_react_queue(req: ReactRequest) -> dict:
+    """Queue an emoji reaction for the outbound-queue-sender task.
+
+    Returns immediately with the queue id — no approval card, no blocking.
+    Limited to the Curated emoji set and REACT_QUEUE_THREADS. Re-queueing an
+    identical pending reaction returns the existing entry (no duplicates).
+    """
+    if req.emoji not in REACT_QUEUE_EMOJI:
+        raise HTTPException(
+            status_code=400,
+            detail=f"emoji not in the allowed set: {sorted(REACT_QUEUE_EMOJI)}",
+        )
+    if REACT_QUEUE_THREADS and req.thread_fbid not in REACT_QUEUE_THREADS:
+        raise HTTPException(
+            status_code=403, detail="thread not allowed for queued reactions"
+        )
+    if not req.message_id.strip():
+        raise HTTPException(status_code=400, detail="message_id must not be empty")
+
+    def _append(items: List[dict]) -> dict:
+        for it in items:
+            if (
+                it.get("status") == "queued"
+                and it.get("type") == "react"
+                and it.get("thread_fbid") == req.thread_fbid
+                and it.get("message_id") == req.message_id
+                and it.get("emoji") == req.emoji
+            ):
+                return {"queued": True, "duplicate": True, **it}
+        item = {
+            "id": secrets.token_hex(8),
+            "type": "react",
+            "thread_fbid": req.thread_fbid,
+            "message_id": req.message_id,
+            "emoji": req.emoji,
+            "status": "queued",
+            "queued_at": time.time(),
+        }
+        items.append(item)
+        return {"queued": True, "duplicate": False, **item}
+
+    return _queue_modify(_append)
+
+
+@app.post("/dms/send/queue", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_send_queue(req: SendQueueRequest) -> dict:
+    """Queue a text DM for the outbound-queue-sender task.
+
+    Returns immediately with the queue id — no approval card, no blocking.
+    Text-only (no attachments in v1), 1000 chars max.
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    if len(text) > 1000:
+        raise HTTPException(
+            status_code=400, detail="text exceeds 1000 characters"
+        )
+    if not (req.thread_fbid or "").strip():
+        raise HTTPException(status_code=400, detail="thread_fbid must not be empty")
+
+    def _append(items: List[dict]) -> dict:
+        item = {
+            "id": secrets.token_hex(8),
+            "type": "send",
+            "thread_fbid": req.thread_fbid,
+            "text": text,
+            "status": "queued",
+            "queued_at": time.time(),
+        }
+        items.append(item)
+        return {"queued": True, **item}
+
+    return _queue_modify(_append)
+
+
+@app.get("/dms/queue", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_queue() -> dict:
+    """Outbound queue status: queued / sent / failed items with timestamps."""
+    items = _queue_read()
+    return {"count": len(items), "items": items}
 
 
 @app.get("/dms/updates", tags=["dms"], dependencies=[Depends(require_api_key)])

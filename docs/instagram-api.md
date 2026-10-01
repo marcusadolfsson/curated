@@ -33,9 +33,10 @@ are never committed; see `instagram-api/.gitignore`.)
 |-------------------|-------------------------------------------------------------------------|
 | `app.py`          | The whole API (~1000 lines). FastAPI app, all endpoints, DM poller thread, oEmbed cache. |
 | `extract_post_json.py` | Helper for `GET /posts/images`: captures the raw logged-out Instagram post JSON (every carousel child) by reusing yt-dlp's extractor internals. Called as a subprocess; yt-dlp must be installed for the system python3. |
+| `drain_outbound_queue.py` | Queue drainer for the `outbound-queue-sender` cron: sends queued reactions/DMs via the CLIs under a file lock. `--dry-run` prints commands without sending. |
 | `start.sh`        | Launches uvicorn on `$PORT` (default 8000) using the venv.              |
 | `manage.sh`       | `start` / `stop` / `restart` / `status` / `logs` for the API process (pidfile-based). |
-| `.env`            | `IG_API_KEY`, `PORT`, `DM_POLL_SECONDS`. Never commit this.             |
+| `.env`            | `IG_API_KEY`, `PORT`, `DM_POLL_SECONDS`, `REACT_QUEUE_THREADS` (comma-separated thread_fbids allowed for queued reactions). Never commit this. |
 | `mac-tunnel.sh`   | `start` / `stop` / `restart` / `status` / `logs` for the reverse SSH tunnel to the Mac. |
 | `tunnel-proxy.py` | `ProxyCommand` helper: the sandbox reaches the outside world through an egress HTTP proxy (`127.0.0.1:3130`); SSH to the Mac is tunneled through it. Without this, outbound SSH is reset by the proxy. |
 | `agent_msgs/`     | JSON storage for the agent bridge (`inbox.json`, `outbox.json`) and lookup caches (`oembed_cache.json`, `video_cache.json`, `image_cache.json`). Created at runtime. |
@@ -68,7 +69,10 @@ else is stdlib (`urllib` for the oEmbed fetch — there is deliberately no
 | GET  | `/dms/threads/{thread_fbid}/messages` | Messages in a thread. |
 | GET  | `/dms/search?q=` | Search DMs. |
 | POST | `/dms/send` | **Write action.** Requires explicit per-action user approval. Never test-send. |
-| POST | `/dms/react` | Body: `thread_fbid`, `message_id` (`mid.$…`), `emoji`. **Write action** — same approval rule. Validation was tested, but never live-tested: a test would be a real, visible reaction. |
+| POST | `/dms/react` | Body: `thread_fbid`, `message_id` (`mid.$…`), `emoji`. **Write action** — the runtime approval card fires on the CLI write itself, no matter who called the API (Mac-direct included); there is no architectural bypass. Use the queue endpoints below for prompt-free sending. |
+| POST | `/dms/react/queue`, `/dms/send/queue` | Enqueue-only: validate, append to `agent_msgs/outbound_queue.json`, return immediately — no CLI call, no card, no blocking. Reactions limited to 9 emoji + `REACT_QUEUE_THREADS` (.env); sends are text-only, 1000 chars max. |
+| GET | `/dms/queue` | Outbound queue status (queued / sent / failed). |
+| | | Drain: `drain_outbound_queue.py` (run by the `outbound-queue-sender` cron every 30s) invokes the CLIs directly under an flock'd queue file. That scheduled task carries the standing Allow for sending — grant it in the task's Allow setting, then enable the task. |
 | GET  | `/dms/updates?since=&wait=` | New-message event feed backed by a server-side poller (see §5). |
 | GET  | `/posts/by-url?url=` | Resolves a `/p/<code>/` or `/reel/<code>/` share URL via Instagram's public oEmbed endpoint (no login). Returns caption, author (username/url/id), classic media ID, thumbnail URL + dimensions, embed HTML. Cached 24h per shortcode in `agent_msgs/oembed_cache.json`. Accepts `/reels/` and normalizes it. 400 for non-Instagram or non-post URLs, 404 when Instagram can't resolve the URL (deleted/private post). |
 | GET  | `/posts/video?url=` | Direct MP4 URL for a shared reel/video post via yt-dlp (no login). Returns a short-lived CDN URL — download promptly, re-request on expiry. Cached 6h per shortcode in `agent_msgs/video_cache.json` (short TTL, the URLs expire). 400 bad URL, 422 no playable video (photo post or withheld), 502/504 extraction failed. Occasional use only, not loops. Registered before `/posts/{media_id}` so "video" isn't captured as an ID. |
