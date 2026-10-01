@@ -57,7 +57,7 @@ curl -s -H "X-API-Key: $KEY" "http://127.0.0.1:8000/reels?limit=5" | head -c 600
 | POST | `/dms/send-file` | Send a DM with a file (multipart; 40 MB max) |
 | POST | `/dms/react` | React to a message — JSON `{"thread_fbid":"...","message_id":"mid.$...","emoji":"❤️"}`. Visible to the other person; new, not yet live-tested |
 | POST | `/dms/react/queue` | Queue a reaction for the sender task — same body as `/dms/react`. Returns immediately, no approval card. Limited to 9 emoji + `REACT_QUEUE_THREADS` |
-| POST | `/dms/send/queue` | Queue a text DM — JSON `{"thread_fbid":"...","text":"..."}`. Returns immediately, no approval card |
+| POST | `/dms/send/queue` | Queue a text DM — JSON `{"thread_fbid":"...","text":"..."}`, optional `reply_to_message_id` (mid.$…) for a quoted reply. Returns immediately, no approval card |
 | GET | `/dms/queue` | Outbound queue status (queued / sent / failed) |
 | GET | `/dms/updates?since=&wait=` | New-message event feed (see below) — poll this instead of `/dms/inbox` |
 
@@ -106,6 +106,8 @@ Narrowing (enforced at enqueue time):
 - Reactions: only ❤️ 😍 🤤 🔥 👏 💡 😂 😮 👍, and only threads listed in
   `REACT_QUEUE_THREADS` (comma-separated thread_fbids in `.env`).
 - Sends: text-only DMs to a thread, 1000 chars max (no attachments in v1).
+  Optional `reply_to_message_id` (a mid.$… id) sends it as a quoted reply;
+  omitted means a plain message.
 - Identical pending reactions are deduped, not double-queued.
 
 ### Posts & reels

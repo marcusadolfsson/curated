@@ -10,7 +10,7 @@ Usage: drain_outbound_queue.py [--dry-run]
 
 Queue file: agent_msgs/outbound_queue.json — a list of:
   {"id", "type": "react"|"send", "thread_fbid",
-   "message_id"?, "emoji"?, "text"?,
+   "message_id"?, "emoji"?, "text"?, "reply_to_message_id"?,
    "status": "queued"|"sent"|"failed",
    "queued_at", "sent_at"?, "error"?}
 
@@ -58,12 +58,16 @@ def _build_cmd(item: dict, account_id: str) -> list:
             "--account-id", account_id,
         ]
     if item["type"] == "send":
-        return [
+        cmd = [
             "instagram-messages-cli", "send",
             "--thread-fbid", item["thread_fbid"],
             "--text", item["text"],
             "--account-id", account_id,
         ]
+        if item.get("reply_to_message_id"):
+            # insert before --account-id to mirror /dms/send's arg order
+            cmd[-2:-2] = ["--reply-to-message-id", item["reply_to_message_id"]]
+        return cmd
     raise ValueError(f"unknown queue item type: {item.get('type')}")
 
 
