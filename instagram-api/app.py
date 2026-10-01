@@ -1,0 +1,1029 @@
+"""Instagram API — a small FastAPI service wrapping instagram-cli and
+instagram-messages-cli for the user's own connected Instagram account.
+
+Endpoints are grouped under: health, dms, posts, reels.
+Auth: every request (except /health) requires header `X-API-Key: <IG_API_KEY>`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import secrets
+import subprocess
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, List, Optional
+
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Security,
+    UploadFile,
+)
+from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, model_validator
+
+# --------------------------------------------------------------------------
+# Config
+# --------------------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+
+def _load_dotenv() -> None:
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_dotenv()
+
+API_KEY = os.environ.get("IG_API_KEY", "")
+PORT = int(os.environ.get("PORT", "8000"))
+
+MAX_DM_FILE_BYTES = 40 * 1024 * 1024        # 40 MiB — instagram-messages-cli limit
+MAX_POST_FILE_BYTES = 100 * 1024 * 1024    # 100 MB — instagram-cli limit
+DM_FILE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov"}
+POST_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+POST_VIDEO_EXTS = {".mp4", ".mov"}
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def require_api_key(key: Optional[str] = Security(api_key_header)) -> None:
+    if not API_KEY or not key or not secrets.compare_digest(key, API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# --------------------------------------------------------------------------
+# CLI helpers
+# --------------------------------------------------------------------------
+
+def _detect_account() -> str:
+    explicit = os.environ.get("IG_ACCOUNT_ID")
+    if explicit:
+        return explicit
+    proc = subprocess.run(
+        ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30
+    )
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Could not read instagram-cli accounts output") from exc
+    accounts = data.get("accounts") or []
+    if not accounts:
+        raise RuntimeError("No Instagram account is connected. Run instagram-cli connect-url.")
+    return accounts[0]["user_fbid"]
+
+
+def _check_messages_connected(account_id: str) -> bool:
+    try:
+        proc = subprocess.run(
+            ["instagram-messages-cli", "accounts"],
+            capture_output=True, text=True, timeout=30,
+        )
+        data = json.loads(proc.stdout)
+        for acct in data.get("accounts") or []:
+            if acct.get("user_fbid") == account_id:
+                return bool(acct.get("connected"))
+    except Exception:
+        pass
+    return False
+
+
+try:
+    ACCOUNT_ID = _detect_account()
+except RuntimeError as exc:
+    raise SystemExit(f"Startup failed: {exc}")
+
+MESSAGES_CONNECTED = _check_messages_connected(ACCOUNT_ID)
+
+
+def run_cli(cli: str, *args: str, timeout: int = 120) -> Any:
+    """Run an instagram CLI command and return its parsed JSON output."""
+    cmd = [cli, *args, "--account-id", ACCOUNT_ID]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail=f"{cli} timed out") from exc
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        raise HTTPException(status_code=502, detail=f"{cli} failed: {err[:600]}")
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"{cli} returned non-JSON output"
+        ) from exc
+
+
+def _optional_arg(flag: str, value: Optional[Any]) -> List[str]:
+    return [flag, str(value)] if value not in (None, "") else []
+
+
+def save_upload(upload: UploadFile, allowed_exts: set[str], max_bytes: int) -> Path:
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix not in allowed_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{suffix}'. Allowed: {sorted(allowed_exts)}",
+        )
+    dest = UPLOAD_DIR / f"{secrets.token_hex(8)}{suffix}"
+    size = 0
+    with dest.open("wb") as fh:
+        for chunk in iter(lambda: upload.file.read(1024 * 1024), b""):
+            size += len(chunk)
+            if size > max_bytes:
+                dest.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=400, detail=f"File exceeds {max_bytes // (1024*1024)} MB limit"
+                )
+            fh.write(chunk)
+    return dest
+
+
+# --------------------------------------------------------------------------
+# DM live updates: background inbox poller + cursor/long-poll endpoint
+#
+# The Mac should NOT poll /dms/inbox directly on a tight loop — every call
+# hits Instagram. Instead this service polls the inbox itself every
+# DM_POLL_SECONDS (env, default 180, minimum 60) and the Mac long-polls the
+# cheap local GET /dms/updates endpoint below.
+# --------------------------------------------------------------------------
+
+DM_POLL_SECONDS = max(60, int(os.environ.get("DM_POLL_SECONDS", "180")))
+DM_MAX_MESSAGES = 300
+
+_dm_lock = threading.Lock()
+_dm_snapshot = {
+    "checked_at": None,   # ISO8601 UTC of the last successful Instagram poll
+    "messages": [],       # newest-first normalized messages
+    "last_cycle_ids": [], # message_ids first seen in the latest poll cycle
+    "failures": 0,        # consecutive poll failures
+}
+
+
+def _parse_iso(s: Optional[str]) -> Optional[datetime]:
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _msg_sent_at(msg: dict) -> Optional[str]:
+    """ISO8601 UTC sent time for a raw inbox message, or None."""
+    sent = msg.get("message_sent_at") or {}
+    if sent.get("utc"):
+        return sent["utc"]
+    try:
+        ts = int(msg.get("timestamp"))
+        return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_dm(thread: dict, msg: dict) -> dict:
+    content = msg.get("content")
+    text: str = ""
+    share_url: Optional[str] = None
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, dict):
+        xma = content.get("xma") or {}
+        share_url = xma.get("target_url")
+        text = content.get("xma_text_body") or ""
+    return {
+        "thread_fbid": thread.get("thread_fbid"),
+        "thread_title": thread.get("thread_title"),
+        "message_id": msg.get("message_id"),
+        "sender_fbid": msg.get("sender_fbid"),
+        "sent_at": _msg_sent_at(msg),
+        "content_type": msg.get("content_type"),
+        "text": text[:500] if isinstance(text, str) else "",
+        "share_url": share_url,
+    }
+
+
+def _dm_state_path() -> "Path":
+    return AGENT_MSGS_DIR / "dm_poll.json"
+
+
+def _persist_dm_snapshot() -> None:
+    try:
+        with _dm_lock:
+            payload = {
+                "checked_at": _dm_snapshot["checked_at"],
+                "messages": _dm_snapshot["messages"],
+                "last_cycle_ids": _dm_snapshot["last_cycle_ids"],
+            }
+        path = _dm_state_path()
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload))
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def _load_dm_snapshot() -> None:
+    try:
+        data = json.loads(_dm_state_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    with _dm_lock:
+        _dm_snapshot["checked_at"] = data.get("checked_at")
+        _dm_snapshot["messages"] = data.get("messages") or []
+        _dm_snapshot["last_cycle_ids"] = data.get("last_cycle_ids") or []
+
+
+def _dm_sort_key(m: dict) -> float:
+    dt = _parse_iso(m.get("sent_at"))
+    return dt.timestamp() if dt else 0.0
+
+
+def _dm_poller_loop() -> None:
+    """Poll Instagram inbox forever; the endpoint serves the cached snapshot."""
+    failures = 0
+    while True:
+        try:
+            data = run_cli(
+                "instagram-messages-cli", "inbox",
+                "--folder", "inbox", "--first", "20", "--message-count", "20",
+                timeout=90,
+            )
+            with _dm_lock:
+                known = {m.get("message_id") for m in _dm_snapshot["messages"]}
+            fresh: List[dict] = []
+            for thread in data.get("threads") or []:
+                for msg in thread.get("messages") or []:
+                    norm = _normalize_dm(thread, msg)
+                    if norm["message_id"] and norm["message_id"] not in known:
+                        fresh.append(norm)
+                        known.add(norm["message_id"])
+            with _dm_lock:
+                fresh_ids = {f["message_id"] for f in fresh}
+                merged = fresh + [
+                    m for m in _dm_snapshot["messages"]
+                    if m.get("message_id") not in fresh_ids
+                ]
+                # Newest-first so the cap below always drops the oldest, and
+                # burst messages stay in chronological order for consumers.
+                merged.sort(key=_dm_sort_key, reverse=True)
+                _dm_snapshot["messages"] = merged[:DM_MAX_MESSAGES]
+                _dm_snapshot["last_cycle_ids"] = [f["message_id"] for f in fresh]
+                _dm_snapshot["checked_at"] = _utcnow()
+                _dm_snapshot["failures"] = 0
+            _persist_dm_snapshot()
+            failures = 0
+            time.sleep(DM_POLL_SECONDS)
+        except Exception as exc:  # keep serving the last good snapshot
+            failures += 1
+            with _dm_lock:
+                _dm_snapshot["failures"] = failures
+            print(f"[dm-poller] poll failed ({failures} consecutive): {exc}", flush=True)
+            time.sleep(min(DM_POLL_SECONDS * (2 ** min(failures, 3)), 900))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _load_dm_snapshot()
+    threading.Thread(target=_dm_poller_loop, name="dm-poller", daemon=True).start()
+    yield
+
+
+# --------------------------------------------------------------------------
+# App
+# --------------------------------------------------------------------------
+
+app = FastAPI(
+    title="Instagram API",
+    description=(
+        "REST API for your connected Instagram account: DMs, posts, and reels. "
+        "Send `X-API-Key` header with every request except /health."
+    ),
+    version="1.3.1",
+    lifespan=lifespan,
+)
+
+
+@app.get("/health", tags=["health"])
+def health() -> dict:
+    with _dm_lock:
+        poller = {
+            "checked_at": _dm_snapshot.get("checked_at"),
+            "failures": _dm_snapshot.get("failures", 0),
+            "cached_messages": len(_dm_snapshot.get("messages", [])),
+        }
+    return {
+        "ok": True,
+        "account_id": ACCOUNT_ID,
+        "messages_connected": MESSAGES_CONNECTED,
+        "dm_poller": poller,
+    }
+
+
+@app.get("/accounts", tags=["health"], dependencies=[Depends(require_api_key)])
+def accounts() -> Any:
+    proc = subprocess.run(
+        ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30
+    )
+    return json.loads(proc.stdout)
+
+
+# --------------------------------------------------------------------------
+# DMs
+# --------------------------------------------------------------------------
+
+class SendMessageRequest(BaseModel):
+    thread_fbid: Optional[str] = None
+    recipient_user_fbids: Optional[List[str]] = None
+    text: Optional[str] = None
+    media_fbid: Optional[str] = None
+    reply_to_message_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "SendMessageRequest":
+        if bool(self.thread_fbid) == bool(self.recipient_user_fbids):
+            raise ValueError("Provide exactly one of thread_fbid or recipient_user_fbids")
+        if not self.text and not self.media_fbid:
+            raise ValueError("Provide at least one of text or media_fbid")
+        return self
+
+
+def _dm_args(req: SendMessageRequest) -> List[str]:
+    args: List[str] = []
+    if req.thread_fbid:
+        args += ["--thread-fbid", req.thread_fbid]
+    else:
+        args += ["--recipient-user-fbids", ",".join(req.recipient_user_fbids or [])]
+    if req.text:
+        args += ["--text", req.text]
+    if req.media_fbid:
+        args += ["--media-fbid", req.media_fbid]
+    if req.reply_to_message_id:
+        args += ["--reply-to-message-id", req.reply_to_message_id]
+    return args
+
+
+@app.get("/dms/inbox", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_inbox(
+    folder: str = Query("inbox", pattern="^(inbox|pending|spam)$"),
+    first: int = Query(20, ge=1, le=100),
+    message_count: int = Query(3, ge=0, le=25),
+    after: Optional[str] = None,
+) -> Any:
+    return run_cli(
+        "instagram-messages-cli", "inbox",
+        "--folder", folder, "--first", str(first),
+        "--message-count", str(message_count),
+        *_optional_arg("--after", after),
+    )
+
+
+@app.get("/dms/inbox/filtered", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_filtered_inbox(
+    filter: str = Query(
+        ..., pattern="^(unread|unanswered|starred|groups|verified|followers|creators|other-participant-followers100k-plus)$"
+    ),
+    thread_limit: int = Query(10, ge=1, le=100),
+    message_count: int = Query(3, ge=0, le=25),
+    folder: str = Query("inbox", pattern="^(inbox|pending|spam)$"),
+) -> Any:
+    """Filtered inbox views. Requires a professional (creator/business) account."""
+    return run_cli(
+        "instagram-messages-cli", "filtered-inbox",
+        "--selected-filter", filter,
+        "--thread-limit", str(thread_limit),
+        "--message-count", str(message_count),
+        "--folder", folder,
+    )
+
+
+@app.get("/dms/threads/{thread_fbid}", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_thread(
+    thread_fbid: str,
+    first: int = Query(20, ge=1, le=100),
+    after: Optional[str] = None,
+) -> Any:
+    return run_cli(
+        "instagram-messages-cli", "thread",
+        "--thread-fbid", thread_fbid, "--first", str(first),
+        *_optional_arg("--after", after),
+    )
+
+
+@app.get("/dms/top-recipients", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_top_recipients(
+    count: int = Query(10, ge=1, le=100),
+    page_max_id: Optional[str] = None,
+) -> Any:
+    return run_cli(
+        "instagram-messages-cli", "top-recipients",
+        "--count", str(count),
+        *_optional_arg("--page-max-id", page_max_id),
+    )
+
+
+@app.get("/dms/search", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_search(
+    keyword: Optional[str] = None,
+    contact: Optional[str] = None,
+    start_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    max_results: int = Query(20, ge=1, le=100),
+) -> Any:
+    if bool(keyword) == bool(contact):
+        raise HTTPException(
+            status_code=400, detail="Provide exactly one of keyword or contact"
+        )
+    args = ["--max-results", str(max_results)] + _optional_arg(
+        "--start-date", start_date
+    ) + _optional_arg("--end-date", end_date)
+    if keyword:
+        return run_cli("instagram-messages-cli", "keyword-search",
+                       "--query-text", keyword, *args)
+    return run_cli("instagram-messages-cli", "contact-search",
+                   "--query-text", contact, *args)
+
+
+@app.get("/dms/temporal", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_temporal(
+    start_date: str = Query(..., description="YYYY-MM-DD"),
+    end_date: str = Query(..., description="YYYY-MM-DD"),
+    max_results: int = Query(15, ge=1, le=100),
+) -> Any:
+    return run_cli(
+        "instagram-messages-cli", "temporal-search",
+        "--start-date", start_date, "--end-date", end_date,
+        "--max-results", str(max_results),
+    )
+
+
+@app.post("/dms/send", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_send(req: SendMessageRequest) -> Any:
+    """Send a text/media DM. Delivers a real message — use deliberately."""
+    return run_cli("instagram-messages-cli", "send", *_dm_args(req), timeout=180)
+
+
+@app.post("/dms/send-file", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_send_file(
+    file: UploadFile = File(...),
+    thread_fbid: Optional[str] = Form(None),
+    recipient_user_fbids: Optional[str] = Form(None),
+    text: Optional[str] = Form(None),
+    reply_to_message_id: Optional[str] = Form(None),
+) -> Any:
+    """Send a DM with an attached file (JPEG/PNG/WebP/GIF/MP4/MOV, up to 40 MB)."""
+    path = save_upload(file, DM_FILE_EXTS, MAX_DM_FILE_BYTES)
+    args: List[str] = []
+    if bool(thread_fbid) == bool(recipient_user_fbids):
+        raise HTTPException(
+            status_code=400, detail="Provide exactly one of thread_fbid or recipient_user_fbids"
+        )
+    if thread_fbid:
+        args += ["--thread-fbid", thread_fbid]
+    else:
+        args += ["--recipient-user-fbids", recipient_user_fbids]
+    if text:
+        args += ["--text", text]
+    if reply_to_message_id:
+        args += ["--reply-to-message-id", reply_to_message_id]
+    args += ["--file", str(path)]
+    try:
+        return run_cli("instagram-messages-cli", "send", *args, timeout=300)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+class ReactRequest(BaseModel):
+    thread_fbid: str
+    message_id: str
+    emoji: str
+
+
+@app.post("/dms/react", tags=["dms"], dependencies=[Depends(require_api_key)])
+def dm_react(req: ReactRequest) -> Any:
+    """Add an emoji reaction to a DM message (message_id looks like 'mid.$...').
+
+    The reaction is visible to the other person — use deliberately.
+    Endpoint is new and has not been live-tested against Instagram yet.
+    """
+    if not req.emoji.strip():
+        raise HTTPException(status_code=400, detail="emoji must not be empty")
+    return run_cli(
+        "instagram-messages-cli", "react",
+        "--thread-fbid", req.thread_fbid,
+        "--message-id", req.message_id,
+        "--emoji", req.emoji,
+    )
+
+
+@app.get("/dms/updates", tags=["dms"], dependencies=[Depends(require_api_key)])
+async def dm_updates(
+    since: Optional[str] = Query(
+        None, description="ISO8601 timestamp; return messages sent strictly after it"
+    ),
+    wait: int = Query(
+        0, ge=0, le=120,
+        description="Long-poll up to this many seconds for new messages",
+    ),
+) -> dict:
+    """New-message event feed — poll this instead of /dms/inbox.
+
+    A background thread polls the Instagram inbox every DM_POLL_SECONDS
+    (default 180s); this endpoint serves the cached snapshot, so Mac-side
+    polling is free. Recommended loop:
+
+        GET /dms/updates?since=<last_seen_sent_at>&wait=45
+
+    Pass back the newest message's `sent_at` as `since` on the next call.
+    If `since` is omitted and `wait` is 0, returns the messages from the most
+    recent poll cycle. With `wait` > 0 and no `since`, waits for messages
+    arriving after the request time.
+    """
+    since_dt = _parse_iso(since)
+    deadline = time.time() + wait
+    while True:
+        with _dm_lock:
+            messages = list(_dm_snapshot["messages"])
+            last_cycle = set(_dm_snapshot["last_cycle_ids"])
+            checked_at = _dm_snapshot["checked_at"]
+            failures = _dm_snapshot["failures"]
+        if since_dt is not None or wait > 0:
+            cutoff = since_dt or datetime.now(timezone.utc)
+            new = [
+                m for m in messages
+                if (dt := _parse_iso(m.get("sent_at"))) is not None and dt > cutoff
+            ]
+        else:
+            new = [m for m in messages if m.get("message_id") in last_cycle]
+        if new or time.time() >= deadline:
+            return {
+                "messages": new,
+                "count": len(new),
+                "checked_at": checked_at,
+                "poll_interval_s": DM_POLL_SECONDS,
+                "poller_failures": failures,
+                "warming_up": checked_at is None,
+            }
+        await asyncio.sleep(2)
+
+
+# --------------------------------------------------------------------------
+# Posts & reels
+# --------------------------------------------------------------------------
+
+POST_TYPES = {"POST", "REEL", "STORY", "HIGHLIGHT"}
+
+
+def _post_type_args(post_types: Optional[str]) -> List[str]:
+    if not post_types:
+        return []
+    types = [t.strip().upper() for t in post_types.split(",") if t.strip()]
+    bad = [t for t in types if t not in POST_TYPES]
+    if bad:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid post_types {bad}. Use: {sorted(POST_TYPES)}"
+        )
+    return ["--post-types", ",".join(types)]
+
+
+# --- Share-URL resolution via Instagram oEmbed --------------------------------
+
+OEMBED_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+OEMBED_CACHE_TTL = 24 * 3600
+
+
+def _parse_share_url(url: str) -> tuple:
+    """Return (kind, shortcode) for an instagram.com /p/ or /reel(s)/ URL."""
+    try:
+        parts = urllib.parse.urlparse(url.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid URL") from exc
+    if parts.netloc.lower().removeprefix("www.") != "instagram.com":
+        raise HTTPException(
+            status_code=400, detail="URL must be an instagram.com link"
+        )
+    m = re.match(r"^/(p|reel|reels)/([A-Za-z0-9_-]+)/?", parts.path or "")
+    if not m:
+        raise HTTPException(
+            status_code=400, detail="URL must be a /p/<code>/ or /reel/<code>/ post link"
+        )
+    kind = "reel" if m.group(1).startswith("reel") else "p"
+    return kind, m.group(2)
+
+
+def _oembed_cache_path() -> Path:
+    return AGENT_MSGS_DIR / "oembed_cache.json"
+
+
+def _oembed_cache_get(shortcode: str) -> Optional[dict]:
+    try:
+        cache = json.loads(_oembed_cache_path().read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    entry = cache.get(shortcode)
+    if not isinstance(entry, dict):
+        return None
+    try:
+        fresh = time.time() - entry["fetched_at"] < OEMBED_CACHE_TTL
+    except (KeyError, TypeError):
+        return None
+    return entry.get("data") if fresh else None
+
+
+def _oembed_cache_set(shortcode: str, data: dict) -> None:
+    path = _oembed_cache_path()
+    try:
+        cache = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        cache = {}
+    if not isinstance(cache, dict):
+        cache = {}
+    cache[shortcode] = {"fetched_at": time.time(), "data": data}
+    if len(cache) > 500:
+        for key in sorted(cache, key=lambda k: cache[k].get("fetched_at", 0))[
+            : len(cache) - 500
+        ]:
+            del cache[key]
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache))
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+@app.get("/profile", tags=["posts"], dependencies=[Depends(require_api_key)])
+def profile() -> Any:
+    return run_cli("instagram-cli", "profile")
+
+
+@app.get("/posts", tags=["posts"], dependencies=[Depends(require_api_key)])
+def list_posts(
+    username: Optional[str] = None,
+    limit: int = Query(25, ge=1, le=100),
+    post_types: Optional[str] = Query(None, description="Comma-separated: POST,REEL,STORY,HIGHLIGHT"),
+    since: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    until: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    after: Optional[str] = None,
+) -> Any:
+    return run_cli(
+        "instagram-cli", "posts",
+        *_optional_arg("--username", username),
+        "--limit", str(limit),
+        *_post_type_args(post_types),
+        *_optional_arg("--since", since),
+        *_optional_arg("--until", until),
+        "--sort-order", sort_order,
+        *_optional_arg("--after", after),
+    )
+
+
+@app.get("/reels", tags=["reels"], dependencies=[Depends(require_api_key)])
+def list_reels(
+    limit: int = Query(25, ge=1, le=100),
+    since: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    until: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    after: Optional[str] = None,
+) -> Any:
+    """Convenience view of your reels (posts with type REEL)."""
+    return run_cli(
+        "instagram-cli", "posts",
+        "--limit", str(limit),
+        "--post-types", "REEL",
+        *_optional_arg("--since", since),
+        *_optional_arg("--until", until),
+        "--sort-order", sort_order,
+        *_optional_arg("--after", after),
+    )
+
+
+def _resolve_post_oembed(kind: str, shortcode: str) -> tuple:
+    """Resolve a share shortcode via Instagram's public oEmbed endpoint.
+
+    Returns (post_dict, cached). This is the only Instagram call the
+    analysis path makes. Raises HTTPException(404/502) on failure.
+    """
+    cached = _oembed_cache_get(shortcode)
+    if cached is not None:
+        return dict(cached), True
+    target = f"https://www.instagram.com/{kind}/{shortcode}/"
+    oembed_url = "https://www.instagram.com/api/v1/oembed/?url=" + urllib.parse.quote(
+        target, safe=""
+    )
+    req = urllib.request.Request(
+        oembed_url,
+        headers={"User-Agent": OEMBED_UA, "Accept": "application/json"},
+    )
+    # One retry on rate-limit/transient errors: the sandbox shares an egress
+    # IP, so a 429 is possible under load. 404 is final (deleted/private).
+    data = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Instagram could not resolve this URL (deleted or private post?)",
+                ) from exc
+            if exc.code not in (429, 500, 502, 503) or attempt == 1:
+                raise HTTPException(
+                    status_code=502, detail=f"Instagram oEmbed failed: HTTP {exc.code}"
+                ) from exc
+            time.sleep(3)
+        except Exception as exc:
+            if attempt == 1:
+                raise HTTPException(
+                    status_code=502, detail=f"Instagram oEmbed failed: {exc}"
+                ) from exc
+            time.sleep(3)
+    assert data is not None  # loop either breaks with data or raises
+    author_id = data.get("author_id")
+    result = {
+        "source": "oembed",
+        "shortcode": shortcode,
+        "url": target,
+        "media_id": data.get("media_id"),
+        "caption": data.get("title"),
+        "author_username": data.get("author_name"),
+        "author_url": data.get("author_url"),
+        "author_id": str(author_id) if author_id is not None else None,
+        "thumbnail_url": data.get("thumbnail_url"),
+        "thumbnail_width": data.get("thumbnail_width"),
+        "thumbnail_height": data.get("thumbnail_height"),
+        "embed_html": data.get("html"),
+    }
+    _oembed_cache_set(shortcode, result)
+    return result, False
+
+
+@app.get("/posts/by-url", tags=["posts"], dependencies=[Depends(require_api_key)])
+def get_post_by_url(
+    url: str = Query(..., description="Instagram /p/<code>/ or /reel/<code>/ share URL"),
+) -> dict:
+    """Resolve a share URL to post metadata via Instagram's public oEmbed endpoint.
+
+    Use this for /p/ or /reel/ links from DMs — the provider's media-ID lookup
+    cannot resolve those (separate ID spaces). Returns caption, author,
+    thumbnail, classic media_id, and embed HTML. No login required.
+    Results are cached 24h per shortcode.
+    """
+    kind, shortcode = _parse_share_url(url)
+    post, cached = _resolve_post_oembed(kind, shortcode)
+    return {**post, "cached": cached}
+
+
+# --------------------------------------------------------------------------
+@app.get("/posts/{media_id}", tags=["posts"], dependencies=[Depends(require_api_key)])
+def get_post(media_id: str) -> Any:
+    return run_cli("instagram-cli", "post", "--id", media_id)
+
+
+@app.get("/posts/{media_id}/comments", tags=["posts"], dependencies=[Depends(require_api_key)])
+def post_comments(
+    media_id: str,
+    limit: int = Query(25, ge=1, le=100),
+    after: Optional[str] = None,
+) -> Any:
+    return run_cli(
+        "instagram-cli", "fetch-post-comments",
+        "--post-ids", media_id, "--limit", str(limit),
+        *_optional_arg("--after", after),
+    )
+
+
+@app.get("/posts/{media_id}/likers", tags=["posts"], dependencies=[Depends(require_api_key)])
+def post_likers(
+    media_id: str,
+    limit: int = Query(25, ge=1, le=100),
+    after: Optional[str] = None,
+) -> Any:
+    return run_cli(
+        "instagram-cli", "fetch-post-likers",
+        "--post-ids", media_id, "--limit", str(limit),
+        *_optional_arg("--after", after),
+    )
+
+
+@app.get("/insights", tags=["posts"], dependencies=[Depends(require_api_key)])
+def account_insights(
+    start_time: int = Query(..., description="Unix timestamp (seconds)"),
+    end_time: int = Query(..., description="Unix timestamp (seconds)"),
+) -> Any:
+    """Account-level insights. Professional (creator/business) accounts only."""
+    return run_cli(
+        "instagram-cli", "account-insights",
+        "--user-id", ACCOUNT_ID,
+        "--start-time", str(start_time),
+        "--end-time", str(end_time),
+    )
+
+
+def _publish_media(
+    files: List[UploadFile],
+    covers: List[UploadFile],
+    caption: str,
+    mentions: str,
+) -> Any:
+    """Publish images and/or videos (video files publish as reels/carousel items)."""
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+
+    saved_files: List[Path] = []
+    saved_covers: List[Path] = []
+    try:
+        videos = 0
+        for upload in files:
+            suffix = Path(upload.filename or "").suffix.lower()
+            if suffix in POST_VIDEO_EXTS:
+                videos += 1
+            allowed = POST_IMAGE_EXTS | POST_VIDEO_EXTS
+            saved_files.append(save_upload(upload, allowed, MAX_POST_FILE_BYTES))
+        for upload in covers:
+            saved_covers.append(save_upload(upload, POST_IMAGE_EXTS, MAX_POST_FILE_BYTES))
+        if videos and len(saved_covers) != videos:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{videos} video file(s) require exactly {videos} cover image(s)",
+            )
+        args: List[str] = []
+        for path in saved_files:
+            args += ["--file", str(path)]
+        for path in saved_covers:
+            args += ["--cover", str(path)]
+        if caption:
+            args += ["--caption", caption]
+        if mentions:
+            try:
+                json.loads(mentions)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail="mentions must be valid JSON") from exc
+            args += ["--mentions", mentions]
+        # No retries on publish: a retry could create a duplicate post.
+        return run_cli("instagram-cli", "post-feed", *args, timeout=600)
+    finally:
+        for path in saved_files + saved_covers:
+            path.unlink(missing_ok=True)
+
+
+@app.post("/posts/publish", tags=["posts"], dependencies=[Depends(require_api_key)])
+def publish_post(
+    files: List[UploadFile] = File(..., description="1 image = post, 1 video = reel, 2+ = carousel"),
+    covers: List[UploadFile] = File(default=[], description="One cover image per video file"),
+    caption: str = Form(""),
+    mentions: str = Form("", description='JSON array, e.g. [{"user_fbid":"123","x":0.5,"y":0.5}]'),
+) -> Any:
+    """Publish an image post, reel, or carousel. One video file publishes as a reel."""
+    return _publish_media(files, covers, caption, mentions)
+
+
+@app.post("/reels/publish", tags=["reels"], dependencies=[Depends(require_api_key)])
+def publish_reel(
+    video: UploadFile = File(..., description="MP4/MOV, vertical 9:16 recommended"),
+    cover: UploadFile = File(..., description="JPEG/PNG/WebP cover image"),
+    caption: str = Form(""),
+) -> Any:
+    """Publish a reel (shared to feed and profile grid)."""
+    return _publish_media([video], [cover], caption, "")
+
+
+# --------------------------------------------------------------------------
+# Agent message bridge (Mac agent <-> Muse, over the reverse tunnel)
+# --------------------------------------------------------------------------
+
+AGENT_MSGS_DIR = BASE_DIR / "agent_msgs"
+AGENT_MSGS_DIR.mkdir(exist_ok=True)
+
+
+def _box_path(name: str) -> Path:
+    return AGENT_MSGS_DIR / f"{name}.json"
+
+
+def _read_box(name: str) -> List[dict]:
+    path = _box_path(name)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_box(name: str, msgs: List[dict]) -> None:
+    path = _box_path(name)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(msgs, indent=2))
+    tmp.replace(path)
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class AgentInbound(BaseModel):
+    sender: str = "mac-agent"
+    text: str
+
+
+class AgentOutbound(BaseModel):
+    text: str
+    to: str = "mac-agent"
+
+
+@app.post("/agent/inbox", tags=["agent"], dependencies=[Depends(require_api_key)])
+def agent_inbox_post(msg: AgentInbound) -> dict:
+    """Mac agent -> Muse. Queued until the inbox watcher picks it up."""
+    if not msg.text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    msgs = _read_box("inbox")
+    entry = {
+        "id": secrets.token_hex(6),
+        "sender": msg.sender,
+        "text": msg.text,
+        "ts": _utcnow(),
+        "read": False,
+    }
+    msgs.append(entry)
+    _write_box("inbox", msgs)
+    return {"ok": True, "id": entry["id"]}
+
+
+@app.get("/agent/inbox", tags=["agent"], dependencies=[Depends(require_api_key)])
+def agent_inbox_get(unread_only: bool = False) -> dict:
+    msgs = _read_box("inbox")
+    if unread_only:
+        msgs = [m for m in msgs if not m.get("read")]
+    return {"count": len(msgs), "messages": msgs}
+
+
+@app.post("/agent/outbox", tags=["agent"], dependencies=[Depends(require_api_key)])
+def agent_outbox_post(msg: AgentOutbound) -> dict:
+    """Muse -> Mac agent. The Mac agent polls GET /agent/outbox."""
+    if not msg.text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    msgs = _read_box("outbox")
+    entry = {
+        "id": secrets.token_hex(6),
+        "to": msg.to,
+        "text": msg.text,
+        "ts": _utcnow(),
+        "read": False,
+    }
+    msgs.append(entry)
+    _write_box("outbox", msgs)
+    return {"ok": True, "id": entry["id"]}
+
+
+@app.get("/agent/outbox", tags=["agent"], dependencies=[Depends(require_api_key)])
+def agent_outbox_get(
+    unread_only: bool = False,
+    mark_read: bool = False,
+) -> dict:
+    """Poll for replies. Use ?unread_only=true&mark_read=true to fetch-and-clear."""
+    msgs = _read_box("outbox")
+    if unread_only:
+        msgs = [m for m in msgs if not m.get("read")]
+    if mark_read and msgs:
+        ids = {m["id"] for m in msgs}
+        all_msgs = _read_box("outbox")
+        for m in all_msgs:
+            if m["id"] in ids:
+                m["read"] = True
+        _write_box("outbox", all_msgs)
+    return {"count": len(msgs), "messages": msgs}
