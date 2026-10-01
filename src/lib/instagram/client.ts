@@ -407,6 +407,26 @@ export async function noteIdentity(username: string, userId: string | null) {
   runtime.statusCache = null;
 }
 
+/**
+ * This account, as the sender of a message: its username and every id it goes
+ * by. The browser's private API and the Instagram API name it differently,
+ * and posts from both are in the table.
+ *
+ * Needed because a thread's participant list leaves the account itself out,
+ * so a post it shared found no name there and took the conversation's title -
+ * the other person's full name. Its own shares were filed under them.
+ */
+export async function ownIdentity(): Promise<{ username: string | null; ids: Set<string> }> {
+  const { username, userId } = await storedIdentity();
+  const ids = new Set<string>();
+  if (userId) ids.add(userId);
+  if (await api.usingApi()) {
+    const { accountId } = await api.health();
+    if (accountId) ids.add(accountId);
+  }
+  return { username, ids };
+}
+
 async function storedIdentity(): Promise<{ username: string | null; userId: string | null }> {
   const username = (await getSetting("sessionUsername")).trim() || null;
   const userId = (await getSetting("sessionUserId")).trim() || null;

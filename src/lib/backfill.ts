@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
-import { RateLimitedError, SessionExpiredError } from "@/lib/instagram/client";
+import { RateLimitedError, SessionExpiredError, ownIdentity } from "@/lib/instagram/client";
 import { collectSharedPosts, fetchThread } from "@/lib/instagram/dm";
 import { downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
@@ -121,6 +121,7 @@ async function run(threadId: string, days: number) {
       state.itemsScanned += items.length;
 
       const usernameById = new Map(users.map((user) => [user.id, user.username]));
+      const me = await ownIdentity();
       let oldestSeen: Date | null = null;
 
       for (const shared of collectSharedPosts(items)) {
@@ -174,6 +175,7 @@ async function run(threadId: string, days: number) {
             messageId: shared.messageId,
             senderId: shared.senderId,
             senderUsername:
+              (shared.senderId && me.ids.has(shared.senderId) ? me.username : null) ??
               (shared.senderId ? usernameById.get(shared.senderId) : null) ??
               thread?.title ??
               null,
