@@ -97,11 +97,7 @@ struct MenuView: View {
             }
 
             if let session = snapshot.session {
-                Row(
-                    "Instagram",
-                    value: session.connected ? "signed in as \(session.username ?? "?")" : "signed out",
-                    tone: session.connected ? .good : .bad
-                )
+                Row("Instagram", value: session.summary, tone: session.connected ? .good : .bad)
             }
 
             // Whether posts are being described at all. Not a fault when off -
@@ -243,7 +239,11 @@ struct MenuView: View {
 
             // The writes. Each one asks first: a menu is easy to hit by
             // accident, and every item below costs something to undo.
-            if let signIn = snapshot.signIn, signIn.working {
+            if snapshot.session?.throughApi == true {
+                // Read through the API: the session lives on Muse, and there
+                // is no browser here to sign in or out of.
+                EmptyView()
+            } else if let signIn = snapshot.signIn, signIn.working {
                 MenuButton("Signing in - see the window", shortcut: nil) {
                     openURL(poller.config.localBase.appending(path: "setup"))
                 }
@@ -296,7 +296,7 @@ struct MenuView: View {
 
             // Only in a bundle that carries its own server and has not got a
             // browser yet. 356 MB is not something to start without asking.
-            if Server.shared.isHost {
+            if Server.shared.isHost, snapshot.session?.throughApi != true {
                 switch Browser.shared.state {
                 case .fetching:
                     MenuButton("Downloading Chromium...", shortcut: nil) {}

@@ -1,3 +1,4 @@
+import * as api from "./api";
 import { noteIdentity } from "./client";
 import { igJson } from "./tab";
 
@@ -55,6 +56,8 @@ export const INBOX_PAGE = 20;
 export const THREAD_PAGE = 20;
 
 export async function fetchInbox(limit: number = INBOX_PAGE): Promise<DmThreadSummary[]> {
+  if (await api.usingApi()) return api.inbox(limit);
+
   // The same shape the inbox page itself requests, so the call is not a new
   // kind of request from this session.
   const query = new URLSearchParams({
@@ -79,6 +82,8 @@ export async function fetchInbox(limit: number = INBOX_PAGE): Promise<DmThreadSu
 
 /** One page of a thread - the newest 20 messages, or the 20 before `cursor`. */
 export async function fetchThread(threadId: string, cursor?: string | null): Promise<DmThread> {
+  if (await api.usingApi()) return api.thread(threadId, cursor);
+
   const query = new URLSearchParams({
     visual_message_return_type: "unseen",
     direction: "older",

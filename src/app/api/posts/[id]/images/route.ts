@@ -9,6 +9,7 @@ import {
   videoIsCached,
   type GalleryImage,
 } from "@/lib/instagram/gallery";
+import { usingApi } from "@/lib/instagram/api";
 import { mediaIdFromShortcode } from "@/lib/instagram/dm";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +33,12 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   if (isVideo) {
     if (videoIsCached(post.videoFile)) {
       return NextResponse.json({ video: `/api/media/${post.videoFile}`, images: [] });
+    }
+    // Through the API there is no video file to be had, and the embed will
+    // not play a reel. Said plainly, so the viewer can show the cover and a
+    // way out rather than a failure.
+    if (await usingApi()) {
+      return NextResponse.json({ video: null, images: [], reason: "api" });
     }
     if (mediaId) {
       try {

@@ -53,6 +53,15 @@ export const DEFAULTS = {
   /** Who the pasted session belongs to, read from the inbox page it loaded. */
   sessionUsername: "",
   sessionUserId: "",
+  /**
+   * Where Instagram is read from: "browser", the signed-in Chromium this app
+   * drives, or "api", the Instagram API on Muse reached through the tunnel.
+   * Never both - with "api" the browser refuses to start at all.
+   */
+  instagramSource: "browser",
+  instagramApiBase: "http://127.0.0.1:8000",
+  /** The newest `sent_at` the API listener has seen; it asks for what came after. */
+  apiUpdatesSince: "",
 } as const;
 
 export type SettingKey = keyof typeof DEFAULTS;

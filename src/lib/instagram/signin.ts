@@ -3,6 +3,7 @@ import type { BrowserContext, Page } from "playwright";
 import { PROFILE_DIR, STORAGE_STATE_PATH, ensureDirs } from "@/lib/paths";
 import { getSyncState } from "@/lib/sync";
 import { startWatcher, stopWatcher } from "@/lib/watcher";
+import { usingApi } from "./api";
 import { browserOptions, closeBrowser, finishSignIn } from "./client";
 
 /**
@@ -98,6 +99,12 @@ export async function beginSignIn(): Promise<SignInState> {
   const sync = getSyncState();
   if (sync.running) {
     return { ...idle, phase: "failed", message: "A sync is running. Try again when it finishes." };
+  }
+  // Signing the browser in while the API is the way in would put a second
+  // client on the account. The API holds the session now; this has nothing
+  // to sign in to.
+  if (await usingApi()) {
+    return { ...idle, phase: "failed", message: "Instagram is read through the API, so there is no browser to sign in." };
   }
 
   runtime.cancel = false;

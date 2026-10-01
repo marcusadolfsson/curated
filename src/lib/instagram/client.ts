@@ -2,6 +2,7 @@ import fs from "node:fs";
 import type { BrowserContext, Page } from "playwright";
 import { PROFILE_DIR, STORAGE_STATE_PATH, ensureDirs } from "@/lib/paths";
 import { asBool, getSetting, setSettings } from "@/lib/settings";
+import * as api from "./api";
 import { RateLimitedError, ScrapingWarningError, SessionExpiredError } from "./errors";
 import { closeInboxTab, igJson, inboxTab } from "./tab";
 
@@ -108,6 +109,8 @@ export type LoginOutcome =
   | { status: "failed"; message: string };
 
 export type SessionStatus = {
+  /** "api" when Instagram is read through the API rather than the browser. */
+  source?: "browser" | "api";
   connected: boolean;
   username: string | null;
   userId: string | null;
@@ -217,6 +220,15 @@ function touchIdleTimer() {
 }
 
 export async function getContext(): Promise<BrowserContext> {
+  // The one way into the browser, so the one place to shut it. With the API
+  // as the source, a browser opening for any reason - a code path nobody
+  // thought to switch over, a stale route - would put a second client on the
+  // account. Refusing here makes that impossible rather than unlikely.
+  if (await api.usingApi()) {
+    // Not SessionExpiredError: that marks the browser's session dead, and the
+    // session is fine - it is simply not the one in use.
+    throw new Error("Instagram is read through the API; the browser stays closed.");
+  }
   if (runtime.context) {
     touchIdleTimer();
     return runtime.context;
@@ -411,6 +423,23 @@ async function storedIdentity(): Promise<{ username: string | null; userId: stri
  * which is the one honest test: it either loads or lands on the login page.
  */
 export async function getSessionStatus(options?: { verify?: boolean }): Promise<SessionStatus> {
+  // Through the API, "connected" means the API answers. Its /health is a
+  // local check that makes no Instagram request, so it is not cached.
+  if (await api.usingApi()) {
+    const health = await api.health();
+    const identity = await storedIdentity();
+    const now = new Date().toISOString();
+    return {
+      source: "api",
+      connected: health.ok,
+      username: identity.username,
+      userId: health.accountId,
+      verifiedAt: health.ok ? now : null,
+      checkedAt: now,
+      message: health.ok ? undefined : "The Instagram API is not answering. The tunnel from Muse may be down.",
+    };
+  }
+
   const cached = runtime.statusCache;
   if (!options?.verify && cached && Date.now() - cached.at < STATUS_TTL_MS) {
     return { ...cached.status, checkedAt: new Date(cached.at).toISOString() };

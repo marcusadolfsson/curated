@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
+import { lastEventFor } from "@/lib/api-watcher";
+import { health, usingApi } from "@/lib/instagram/api";
 import { isSessionKnownDead } from "@/lib/instagram/client";
-import { collectMessages, fetchThread } from "@/lib/instagram/dm";
+import { collectMessages, fetchThread, type DmThread } from "@/lib/instagram/dm";
 import { sendMessage } from "@/lib/instagram/reply";
 import { pauseState } from "@/lib/pause";
 import { getSetting } from "@/lib/settings";
@@ -45,13 +47,44 @@ async function chosenThread(threadId: string | null) {
   return watched[0] ?? null;
 }
 
+/**
+ * Through the API, the last read of each thread, kept briefly.
+ *
+ * The page asks every 45 seconds while it is open, and through the browser
+ * that was a fetch in a tab already sitting on the inbox. Through the API
+ * every read is a request to Instagram, so the page is answered from here
+ * unless the listener has seen something new in this thread since, or the
+ * copy is five minutes old.
+ */
+const CHAT_CACHE_MS = 5 * 60_000;
+const globalForChat = globalThis as unknown as {
+  __chatCache?: Map<string, { at: number; thread: Pick<DmThread, "items" | "users"> }>;
+};
+const chatCache = (globalForChat.__chatCache ??= new Map());
+
+async function readForChat(threadId: string, threadFbid: string | null) {
+  if (!(await usingApi())) return fetchThread(threadId);
+  const held = chatCache.get(threadId);
+  const changed = lastEventFor(threadFbid);
+  if (held && Date.now() - held.at < CHAT_CACHE_MS && (changed === null || changed <= held.at)) {
+    return held.thread;
+  }
+  const { items, users } = await fetchThread(threadId);
+  chatCache.set(threadId, { at: Date.now(), thread: { items, users } });
+  return { items, users };
+}
+
 export async function GET(request: NextRequest) {
   const thread = await chosenThread(request.nextUrl.searchParams.get("threadId"));
   if (!thread) {
     return NextResponse.json({ error: "No conversation is being watched yet." }, { status: 404 });
   }
 
-  const me = (await getSetting("sessionUserId")).trim() || null;
+  // The API names people by a different id from the browser's, so "me" has
+  // to come from the same place the messages do.
+  const me = (await usingApi())
+    ? (await health()).accountId
+    : (await getSetting("sessionUserId")).trim() || null;
   const base = { threadId: thread.threadId, title: thread.title, me };
 
   if (isSessionKnownDead()) {
@@ -63,7 +96,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { items, users } = await fetchThread(thread.threadId);
+    const { items, users } = await readForChat(thread.threadId, thread.threadV2Id);
     const messages = collectMessages(items);
 
     // What the app already knows about the posts mentioned, so a share reads
@@ -126,6 +159,8 @@ export async function POST(request: NextRequest) {
   }
 
   const outcome = await sendMessage({ threadV2Id: thread.threadV2Id, text });
+  // So what was just sent shows on the next read rather than in five minutes.
+  if (outcome.ok) chatCache.delete(thread.threadId);
   return NextResponse.json(
     { ok: outcome.ok, error: outcome.ok ? null : outcome.error },
     { status: outcome.ok ? 200 : 502 },

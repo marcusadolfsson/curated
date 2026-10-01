@@ -136,6 +136,22 @@ were read out of Instagram's own JavaScript bundle. If reactions start failing
 with a GraphQL error rather than a network one, the persisted-query id in
 `src/lib/instagram/react.ts` is the first thing to re-check.
 
+**Or through an API, with no browser at all.** Curated can read Instagram
+through a separate Instagram API service instead of its own Chromium. The
+service answers on `http://127.0.0.1:8000` (in practice through an SSH tunnel
+it opens to the Mac), takes an `X-API-Key` read from
+`~/.curated/instagram-api-key`, and offers the inbox, threads, sending,
+reactions, a post lookup by link, and `/dms/updates` - its own cache of new
+messages, which it refreshes from Instagram on a schedule. Curated long-polls
+that cache, so a sync runs only when somebody actually sent something.
+
+Switch with `POST /api/source` and `{"source": "api"}` (or `"browser"` to go
+back). It refuses mid-sync, closes the browser before the listener starts, and
+from then on the browser refuses to open at all, so the account never has two
+clients reading at once. Two things are different through the API: a share's
+caption and cover come from the post's public oEmbed lookup, and there is no
+video file to be had, so a new reel shows its cover and opens in Instagram.
+
 **Where the traffic comes from.** This matters more than anything else here.
 Instagram treats datacenter addresses as suspect: from a cloud VM the login
 endpoint returns 429 while the home page loads fine, and a session cookie minted
