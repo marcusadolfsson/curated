@@ -30,7 +30,9 @@ export async function GET() {
 
   const byCountry = new Map<string, Map<string, TravelPost[]>>();
   for (const post of rows) {
-    const country = post.placeCountry ?? "Somewhere";
+    // Antarctica, the Arctic, the Red Sea: no country, so the region is
+    // its own section rather than "somewhere".
+    const country = post.placeCountry ?? (post.placeRegion as string);
     const region = post.placeRegion as string;
     const regions = byCountry.get(country) ?? new Map<string, TravelPost[]>();
     const list = regions.get(region) ?? [];
