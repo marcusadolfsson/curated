@@ -82,7 +82,7 @@ fi
 # the request: the previous bundle ended up inside the next one, and the local
 # editor settings came along too. Pruning here is not elegant but it does not
 # depend on the tracer behaving.
-for stray in dist data docs menubar .git .claude .private CLAUDE.md CLAUDE.local.md tools; do
+for stray in dist data docs menubar instagram-api .git .claude .private CLAUDE.md CLAUDE.local.md tools; do
   rm -rf "${OUT:?}/$stray"
 done
 
