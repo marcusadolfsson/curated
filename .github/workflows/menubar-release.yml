@@ -6,7 +6,9 @@
 # notarized DMG; run it by hand (Actions › Menu bar release › Run workflow) to
 # get the DMG as an artifact without publishing.
 #
-# Repository secrets (Settings › Secrets and variables › Actions):
+# Secrets live in the `release` environment (Settings › Environments), which
+# only main and menubar-v* tags may use, so no other workflow - and nothing a
+# fork's pull request runs - can read them:
 #   APPLE_CERTIFICATE           base64 of the Developer ID Application .p12
 #   APPLE_CERTIFICATE_PASSWORD  the .p12's password
 #   KEYCHAIN_PASSWORD           any string; protects the temporary keychain
@@ -36,6 +38,7 @@ jobs:
     # An Apple Silicon runner: the app is built for the machine that builds it.
     runs-on: macos-15
     timeout-minutes: 90
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
