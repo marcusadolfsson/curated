@@ -35,6 +35,13 @@ import { getSyncState, startSync } from "@/lib/sync";
  */
 
 export type WatcherState = {
+  /** Which way it listens: the browser's socket, or the API's update feed. */
+  via?: "browser" | "api";
+  /**
+   * Through the API: when the API last checked Instagram's inbox, which is
+   * how fresh "nothing new" is. The listener itself never reaches Instagram.
+   */
+  upstreamCheckedAt?: string | null;
   enabled: boolean;
   listening: boolean;
   since: string | null;

@@ -16,6 +16,11 @@ import Foundation
 // not do".
 
 struct WatchPayload: Decodable {
+    /// "api" when it waits on the Instagram API's update feed rather than a
+    /// browser socket. Absent from older servers, which is the browser.
+    var via: String?
+    /// Through the API: when the API last checked Instagram's inbox.
+    var upstreamCheckedAt: Date?
     var enabled: Bool
     var listening: Bool
     var since: Date?
@@ -25,6 +30,17 @@ struct WatchPayload: Decodable {
     var syncsTriggered: Int
     var eventsSeen: Int
     var error: String?
+}
+
+extension WatchPayload {
+    var throughApi: Bool { via == "api" }
+
+    /// The Watcher row. Through the API there are no sockets to count; what
+    /// matters is that the feed answers.
+    var summary: String {
+        guard listening else { return enabled ? "not listening" : "disabled" }
+        return throughApi ? "listening via API" : "listening · \(Format.count(sockets, "socket"))"
+    }
 }
 
 struct SyncRun: Decodable {
