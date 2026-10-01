@@ -1,7 +1,7 @@
 import { eq, gte } from "drizzle-orm";
 import { db } from "@/db";
-import { syncRuns, threads } from "@/db/schema";
-import { ApiUnavailableError, updates } from "@/lib/instagram/api";
+import { posts, syncRuns, threads } from "@/db/schema";
+import { ApiUnavailableError, outboundQueue, outstanding, updates, type QueueItem } from "@/lib/instagram/api";
 import { RateLimitedError } from "@/lib/instagram/errors";
 import { pauseAutomation, pauseState } from "@/lib/pause";
 import { asBool, getSetting, setSettings } from "@/lib/settings";
@@ -128,6 +128,8 @@ async function listen() {
       runtime.state.error = null;
       runtime.failures = 0;
 
+      await reconcileQueue();
+
       if (batch.messages.length > 0) {
         const newest: string = batch.messages.reduce<string>(
           (latest, message) => (message.sent_at > latest ? message.sent_at : latest),
@@ -175,6 +177,62 @@ async function listen() {
       }
       await sleep(delay);
     }
+  }
+}
+
+const QUEUE_CHECK_MS = 30_000;
+const QUEUE_STALE_MS = 10 * 60_000;
+let lastQueueCheck = 0;
+
+/**
+ * Finds out what became of reactions and messages this app queued.
+ *
+ * A queued reaction is recorded as sent the moment the queue takes it, so the
+ * post shows it at once. If Muse's sender later fails it, the record is taken
+ * back off the post and the error put in its place. Items still waiting after
+ * ten minutes mean the sender is not running - on Muse it is a scheduled task
+ * that has to be enabled - and the menu says so rather than leaving it silent.
+ * Only asks while something of ours is outstanding; the queue is local to the
+ * API and never reaches Instagram.
+ */
+async function reconcileQueue() {
+  if (outstanding.size === 0 || Date.now() - lastQueueCheck < QUEUE_CHECK_MS) return;
+  lastQueueCheck = Date.now();
+
+  let items: QueueItem[];
+  try {
+    items = await outboundQueue();
+  } catch {
+    return; // asked again on the next pass
+  }
+  const byId = new Map(items.map((item) => [item.id, item]));
+
+  let waiting = 0;
+  for (const [id, queuedAt] of outstanding) {
+    const item = byId.get(id);
+    if (!item || item.status === "sent") {
+      outstanding.delete(id);
+      continue;
+    }
+    if (item.status === "failed") {
+      outstanding.delete(id);
+      const why = `Muse could not send it: ${item.error ?? "no reason given"}`;
+      console.warn(`[queue] ${item.type} ${id} failed - ${why}`);
+      if (item.type === "react" && item.message_id) {
+        await db
+          .update(posts)
+          .set({ reactedAt: null, reactionEmoji: null, reactionError: why.slice(0, 500) })
+          .where(eq(posts.messageId, item.message_id));
+      }
+      continue;
+    }
+    if (Date.now() - queuedAt > QUEUE_STALE_MS) waiting += 1;
+  }
+
+  if (waiting > 0) {
+    runtime.state.error =
+      `${waiting} reaction${waiting === 1 ? "" : "s"} or message${waiting === 1 ? "" : "s"} waiting in Muse's send ` +
+      "queue for over ten minutes. Is the outbound-queue-sender task enabled on Muse?";
   }
 }
 

@@ -153,6 +153,13 @@ caption and cover come from the post's public oEmbed lookup, and a reel's
 video comes from the API's `/posts/video`, which finds it without the
 account and hands back a signed CDN link that Curated downloads at once.
 Every photo of a carousel comes the same way, from `/posts/images`.
+Reactions and replies are not sent directly: sending through the API asks for
+approval on its side, one action at a time, so Curated puts them in the API's
+outbound queue (`/dms/react/queue`, `/dms/send/queue`), and a scheduled task
+there with one standing approval sends them within about half a minute.
+Curated checks `/dms/queue` afterwards and takes a reaction back off the post
+if it failed. Until the queue carries `reply_to_message_id`, a reply arrives as
+a plain message rather than quoting the post.
 
 **Where the traffic comes from.** This matters more than anything else here.
 Instagram treats datacenter addresses as suspect: from a cloud VM the login

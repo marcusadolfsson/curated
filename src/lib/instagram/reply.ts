@@ -40,10 +40,11 @@ export async function sendTextReply(options: {
   }
   if (!text.trim()) return { ok: false, error: "Nothing to send." };
 
-  // The API addresses a thread by the same id the mutation below does.
+  // The API addresses a thread by the same id the mutation below does, and
+  // queues rather than sends, for the same reason reactions do.
   if (await usingApi()) {
-    const outcome = await api.send({ threadFbid: threadV2Id, text: text.trim(), replyToMessageId });
-    if (outcome.ok) console.log(`[reply] sent through the API to ${replyToMessageId ?? "the thread"}`);
+    const outcome = await api.queueMessage({ threadFbid: threadV2Id, text: text.trim(), replyToMessageId });
+    if (outcome.ok) console.log(`[reply] queued for ${replyToMessageId ?? "the thread"}`);
     return outcome;
   }
 

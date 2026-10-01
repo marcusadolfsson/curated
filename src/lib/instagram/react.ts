@@ -43,9 +43,14 @@ export async function sendReaction(options: {
   if (await usingApi()) {
     // The API sends a reaction; it has no way to take one back.
     if (remove) return { ok: false, error: "Removing a reaction is not possible through the Instagram API." };
-    const outcome = await api.react({ threadFbid: threadV2Id, messageId, emoji: bareEmoji(emoji) });
-    if (outcome.ok) console.log(`[reactions] sent ${emoji} to ${messageId} through the API`);
-    return outcome;
+    // Queued, not sent directly: a direct send asks for approval on Muse's
+    // side every time, and the queue's sender carries one standing approval.
+    // The emoji goes as Curated stores it - the queue checks it against the
+    // same nine.
+    const outcome = await api.queueReaction({ threadFbid: threadV2Id, messageId, emoji });
+    if (!outcome.ok) return outcome;
+    console.log(`[reactions] queued ${emoji} for ${messageId} (queue item ${outcome.queueId})`);
+    return { ok: true };
   }
 
   const call = {

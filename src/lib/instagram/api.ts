@@ -337,6 +337,79 @@ export async function postImages(permalink: string): Promise<ApiPostItem[] | nul
   }
 }
 
+// ---------------------------------------------------------------------------
+// The outbound queue.
+//
+// A send or a reaction made through the API directly asks Marcus to approve
+// it on Muse's side, one card per action. Queued instead, it is sent by a
+// scheduled task on Muse that carries one standing approval, within about
+// half a minute. The queue answers at once; whether the item went is learned
+// afterwards from /dms/queue, which the listener checks while anything of
+// ours is still waiting.
+
+export type QueueItem = {
+  id: string;
+  type: "react" | "send";
+  thread_fbid: string;
+  message_id?: string;
+  emoji?: string;
+  text?: string;
+  status: "queued" | "sent" | "failed";
+  queued_at: number;
+  sent_at?: number;
+  error?: string;
+};
+
+const globalForQueue = globalThis as unknown as { __igQueued?: Map<string, number> };
+/** Items this app queued and has not yet seen resolved, by id, with when. */
+export const outstanding: Map<string, number> = (globalForQueue.__igQueued ??= new Map());
+
+export async function queueReaction(options: {
+  threadFbid: string;
+  messageId: string;
+  emoji: string;
+}): Promise<{ ok: true; queueId: string } | { ok: false; error: string }> {
+  try {
+    const item = await call<Partial<QueueItem>>("POST", "/dms/react/queue", {
+      body: { thread_fbid: options.threadFbid, message_id: options.messageId, emoji: options.emoji },
+    });
+    if (!item.id) return { ok: false, error: "The queue took the reaction but returned no id." };
+    if (item.status !== "sent") outstanding.set(item.id, Date.now());
+    return { ok: true, queueId: item.id };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function queueMessage(options: {
+  threadFbid: string;
+  text: string;
+  replyToMessageId?: string | null;
+}): Promise<{ ok: true; messageId: null } | { ok: false; error: string }> {
+  try {
+    const item = await call<Partial<QueueItem>>("POST", "/dms/send/queue", {
+      body: {
+        thread_fbid: options.threadFbid,
+        text: options.text,
+        // Not read by the queue yet; sent along so a quoted reply becomes one
+        // as soon as it is. Until then it arrives as a plain message.
+        reply_to_message_id: options.replyToMessageId ?? null,
+      },
+    });
+    if (!item.id) return { ok: false, error: "The queue took the message but returned no id." };
+    if (item.status !== "sent") outstanding.set(item.id, Date.now());
+    return { ok: true, messageId: null };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The whole outbound queue. Local to the API; never reaches Instagram. */
+export async function outboundQueue(): Promise<QueueItem[]> {
+  const data = await call<{ items?: QueueItem[] }>("GET", "/dms/queue");
+  return data.items ?? [];
+}
+
 export async function send(options: {
   threadFbid: string;
   text: string;
