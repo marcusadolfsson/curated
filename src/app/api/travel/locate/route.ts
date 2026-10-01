@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { locatePending, locateState } from "@/lib/places";
+import { consolidateRegions, locatePending, locateState } from "@/lib/places";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,11 @@ export const dynamic = "force-dynamic";
  */
 export async function POST() {
   if (!locateState().running) {
-    void locatePending().catch((error) => console.error("[places] failed:", error));
+    // Placing tidies the regions itself when it placed anything; with nothing
+    // left to place, a call here still tidies, for a list placed before that.
+    void locatePending()
+      .then((result) => (result.checked === 0 ? consolidateRegions() : 0))
+      .catch((error) => console.error("[places] failed:", error));
   }
   return NextResponse.json(locateState());
 }

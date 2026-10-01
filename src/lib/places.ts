@@ -111,6 +111,7 @@ export async function locatePending(): Promise<{ placed: number; checked: number
       state.done = Math.min(start + batch.length, waiting.length);
     }
     console.log(`[places] placed ${placed} of ${waiting.length} travel post(s)`);
+    if (placed > 0) await consolidateRegions();
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
     console.error("[places] stopped:", error);
@@ -118,6 +119,110 @@ export async function locatePending(): Promise<{ placed: number; checked: number
     state.running = false;
   }
   return { placed, checked: waiting.length };
+}
+
+const MERGE_PROMPT = `You tidy the regions on a personal travel list, so that posts about one area sit together.
+
+You get every region on the list, by country, with how many posts each has and the places in it. Say which regions should be folded into another region of the same country:
+
+- Merge a region into another when it lies inside it, or is the same area under another name: Kauai into Hawaii, Havasupai into Grand Canyon, the Bavarian Alps into Bavaria or the other way round - whichever is the better-known name for the area as a whole.
+- Keep the level a person would plan a trip around. A famous named area (Banff National Park, the Dolomites, the Swiss Alps) stays itself and is not folded into its state or province; but a state or province whose places all lie in such an area folds into it.
+- A region named after the whole country takes posts that are about the country in general. Leave it alone.
+- Never merge two separate areas because they are near each other, and never merge across countries.
+- When in doubt, do not merge. Return only the merges you are sure of; an empty list is a fine answer.`;
+
+const MERGE_SCHEMA = {
+  type: "object",
+  properties: {
+    merges: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          country: { type: ["string", "null"] },
+          from: { type: "string" },
+          into: { type: "string" },
+        },
+        required: ["country", "from", "into"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["merges"],
+  additionalProperties: false,
+} as const;
+
+/**
+ * Folds regions that are one area under two names into one.
+ *
+ * Placing is done in batches, and the first batches choose before the list of
+ * regions has filled in, so the same area can end up as Havasupai in one batch
+ * and Grand Canyon in a later one. One look at the whole list afterwards puts
+ * them back together. Only ever merges within a country, and only names it was
+ * given, so it cannot invent a region or move a post abroad.
+ */
+export async function consolidateRegions(): Promise<number> {
+  const rows = await db
+    .select({ country: posts.placeCountry, region: posts.placeRegion, place: posts.place })
+    .from(posts)
+    .where(and(eq(posts.category, "Travel"), isNotNull(posts.placeRegion)));
+
+  const byRegion = new Map<string, { country: string | null; region: string; count: number; places: Set<string> }>();
+  for (const row of rows) {
+    const key = `${row.country ?? ""}\u0000${row.region}`;
+    const entry = byRegion.get(key) ?? { country: row.country, region: row.region as string, count: 0, places: new Set() };
+    entry.count += 1;
+    if (row.place && entry.places.size < 6) entry.places.add(row.place);
+    byRegion.set(key, entry);
+  }
+  if (byRegion.size < 2) return 0;
+
+  const listing = [...byRegion.values()]
+    .sort((a, b) => (a.country ?? "").localeCompare(b.country ?? "") || b.count - a.count)
+    .map((r) => `${r.country ?? "(no country)"} > ${r.region} (${r.count}): ${[...r.places].join("; ") || "-"}`)
+    .join("\n");
+
+  const settings = await getSettings();
+  const stream = query({
+    prompt: `The regions on the list:\n${listing}`,
+    options: {
+      model: settings.analysisModel || undefined,
+      effort: "low",
+      systemPrompt: { type: "custom", prompt: MERGE_PROMPT },
+      tools: [],
+      settingSources: [],
+      persistSession: false,
+      env: agentEnv(),
+      maxTurns: 3,
+      outputFormat: { type: "json_schema", schema: MERGE_SCHEMA as unknown as Record<string, unknown> },
+    },
+  });
+
+  let merges: { country: string | null; from: string; into: string }[] = [];
+  for await (const message of stream) {
+    if (message.type !== "result" || message.subtype !== "success") continue;
+    merges = (message.structured_output as { merges?: typeof merges } | undefined)?.merges ?? [];
+  }
+
+  let applied = 0;
+  for (const merge of merges) {
+    const country = merge.country ?? null;
+    const known = (name: string) => byRegion.has(`${country ?? ""}\u0000${name}`);
+    // Only names that are on the list, in the same country, and not a no-op.
+    if (merge.from === merge.into || !known(merge.from) || !known(merge.into)) continue;
+    await db
+      .update(posts)
+      .set({ placeRegion: merge.into })
+      .where(
+        and(
+          eq(posts.placeRegion, merge.from),
+          country === null ? isNull(posts.placeCountry) : eq(posts.placeCountry, country),
+        ),
+      );
+    applied += 1;
+    console.log(`[places] merged ${country ?? "(no country)"} > ${merge.from} into ${merge.into}`);
+  }
+  return applied;
 }
 
 async function knownRegions(): Promise<string[]> {
