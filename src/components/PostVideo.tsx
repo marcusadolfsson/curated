@@ -65,6 +65,8 @@ export default function PostVideo({
 }) {
   const [src, setSrc] = useState<string | null>(video);
   const [failed, setFailed] = useState(false);
+  /** No video by design (read through the API), not because a fetch failed. */
+  const [elsewhere, setElsewhere] = useState(false);
   const [audio, setAudio] = useState<"unknown" | "on" | "off">("unknown");
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -93,9 +95,12 @@ export default function PostVideo({
     fetched.current = true;
     void fetch(`/api/posts/${postId}/images`)
       .then((response) => (response.ok ? response.json() : { video: null }))
-      .then((body: { video?: string | null }) => {
+      .then((body: { video?: string | null; reason?: string }) => {
         if (body.video) setSrc(body.video);
-        else setFailed(true);
+        else {
+          setElsewhere(body.reason === "api");
+          setFailed(true);
+        }
       })
       .catch(() => setFailed(true));
   };
@@ -219,6 +224,34 @@ export default function PostVideo({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+
+  if (failed && elsewhere) {
+    // The cover, and the reel one tap away in Instagram itself.
+    return (
+      <a
+        href={permalink}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="relative flex h-full min-h-[300px] w-full items-center justify-center bg-black"
+        aria-label="Watch this reel on Instagram"
+      >
+        {poster ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={poster}
+            alt=""
+            className={`absolute inset-0 h-full w-full ${fit === "contain" ? "object-contain" : "object-cover"}`}
+          />
+        ) : null}
+        <span className="relative flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-[14px] text-white backdrop-blur">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M3 1.5v11l9-5.5z" fill="currentColor" />
+          </svg>
+          Watch on Instagram
+        </span>
+      </a>
+    );
+  }
 
   if (failed) {
     return (

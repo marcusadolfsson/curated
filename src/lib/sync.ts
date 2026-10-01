@@ -19,6 +19,7 @@ import {
   type DmUser,
   type Json,
 } from "@/lib/instagram/dm";
+import { ApiUnavailableError } from "@/lib/instagram/api";
 import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
@@ -298,7 +299,8 @@ async function runSync() {
       if (
         error instanceof SessionExpiredError ||
         error instanceof RateLimitedError ||
-        error instanceof ScrapingWarningError
+        error instanceof ScrapingWarningError ||
+        error instanceof ApiUnavailableError
       ) throw error;
       console.error(`[sync] thread ${threadId} failed:`, error);
     }
@@ -355,7 +357,8 @@ async function prefetchVideos(postIds: number[]) {
       if (
         error instanceof SessionExpiredError ||
         error instanceof RateLimitedError ||
-        error instanceof ScrapingWarningError
+        error instanceof ScrapingWarningError ||
+        error instanceof ApiUnavailableError
       ) throw error;
       console.error(`[sync] could not fetch the reel for ${post.shortcode}:`, error);
     }

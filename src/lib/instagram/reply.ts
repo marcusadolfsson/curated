@@ -1,3 +1,5 @@
+import * as api from "./api";
+import { usingApi } from "./api";
 import {
   graphqlPage,
   looksStale,
@@ -37,6 +39,13 @@ export async function sendTextReply(options: {
     return { ok: false, error: "Missing the thread this message needs." };
   }
   if (!text.trim()) return { ok: false, error: "Nothing to send." };
+
+  // The API addresses a thread by the same id the mutation below does.
+  if (await usingApi()) {
+    const outcome = await api.send({ threadFbid: threadV2Id, text: text.trim(), replyToMessageId });
+    if (outcome.ok) console.log(`[reply] sent through the API to ${replyToMessageId ?? "the thread"}`);
+    return outcome;
+  }
 
   const call = {
     docId: TEXT_DOC_ID,

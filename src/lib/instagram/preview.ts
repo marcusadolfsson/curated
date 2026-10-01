@@ -1,3 +1,4 @@
+import { postByUrl, usingApi } from "./api";
 import { mediaIdFromShortcode } from "./dm";
 import { SessionExpiredError } from "./errors";
 import { fetchMediaInfo, largest } from "./gallery";
@@ -22,6 +23,14 @@ export async function fetchPostPreview(
   shortcode: string,
   knownMediaId?: string | null,
 ): Promise<PostPreview> {
+  // Through the API every share arrives as a bare link, so this is how every
+  // post gets its cover and caption - from the link, by the API's public
+  // oEmbed lookup, without the account.
+  if (await usingApi()) {
+    const post = await postByUrl(`https://www.instagram.com/p/${shortcode}/`);
+    return post ? { ...post, mediaId: post.mediaId ?? knownMediaId ?? null } : EMPTY;
+  }
+
   const mediaId = knownMediaId ?? mediaIdFromShortcode(shortcode);
   if (!mediaId) return EMPTY;
 

@@ -60,11 +60,26 @@ struct SyncPayload: Decodable {
 }
 
 struct SessionPayload: Decodable {
+    /// "api" when Instagram is read through the Instagram API on Muse rather
+    /// than the app's own browser. Absent from older servers, which is "browser".
+    var source: String?
     var connected: Bool
     var username: String?
     var userId: String?
     var checkedAt: Date?
     var verifiedAt: Date?
+}
+
+extension SessionPayload {
+    var throughApi: Bool { source == "api" }
+
+    /// The Instagram row: who, and by which way in.
+    var summary: String {
+        if throughApi {
+            return connected ? "via API as \(username ?? "?")" : "API not answering"
+        }
+        return connected ? "signed in as \(username ?? "?")" : "signed out"
+    }
 }
 
 /// Only the counts are read. The `posts` array is ignored, which is why this is
@@ -188,7 +203,13 @@ extension Snapshot {
         // nothing recovers on its own: a person has to paste a session cookie
         // on the Setup page. Everything else here either heals or backs off.
         if let session, !session.connected {
-            found.append(Concern(health: .attention, text: "Signed out of Instagram. Paste a session cookie on the Setup page."))
+            if session.throughApi {
+                // Not a sign-in: the API on Muse or its tunnel is down, and
+                // Muse restarts both. Nothing to do here but say so.
+                found.append(Concern(health: .attention, text: "The Instagram API is not answering. The tunnel from Muse may be down."))
+            } else {
+                found.append(Concern(health: .attention, text: "Signed out of Instagram. Paste a session cookie on the Setup page."))
+            }
         }
 
         if let pause = sync?.pause, pause.paused {
@@ -237,7 +258,9 @@ extension Snapshot {
     var headline: String {
         if let first = concerns.first { return first.text }
         if let session, session.connected, let name = session.username {
-            return "Everything healthy, signed in as \(name)."
+            return session.throughApi
+                ? "Everything healthy, reading \(name) through the API."
+                : "Everything healthy, signed in as \(name)."
         }
         return "Everything healthy."
     }

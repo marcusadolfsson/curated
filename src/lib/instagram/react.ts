@@ -1,3 +1,5 @@
+import * as api from "./api";
+import { usingApi } from "./api";
 import {
   graphqlPage,
   looksStale,
@@ -36,6 +38,14 @@ export async function sendReaction(options: {
 
   if (!threadV2Id || !messageId) {
     return { ok: false, error: "Missing the thread or message id this reaction needs." };
+  }
+
+  if (await usingApi()) {
+    // The API sends a reaction; it has no way to take one back.
+    if (remove) return { ok: false, error: "Removing a reaction is not possible through the Instagram API." };
+    const outcome = await api.react({ threadFbid: threadV2Id, messageId, emoji: bareEmoji(emoji) });
+    if (outcome.ok) console.log(`[reactions] sent ${emoji} to ${messageId} through the API`);
+    return outcome;
   }
 
   const call = {

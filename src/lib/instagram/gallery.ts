@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MEDIA_DIR, ensureDirs } from "@/lib/paths";
+import { usingApi } from "./api";
 import { igFetch, igJson } from "./tab";
 
 /**
@@ -42,6 +43,12 @@ const INFO_MEMO_MAX = 200;
 const infoMemo = new Map<string, { at: number; item: MediaNode | null }>();
 
 export async function fetchMediaInfo(mediaId: string): Promise<MediaNode | null> {
+  // The media endpoint is the browser session's. Through the API there is no
+  // full-size gallery and no video file: the viewer plays the post in
+  // Instagram's own embed instead, so the galleries and reels built on this
+  // simply come back empty.
+  if (await usingApi()) return null;
+
   const held = infoMemo.get(mediaId);
   if (held && Date.now() - held.at < INFO_MEMO_MS) return held.item;
 

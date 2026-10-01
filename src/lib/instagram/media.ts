@@ -1,7 +1,31 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MEDIA_DIR, ensureDirs } from "@/lib/paths";
+import { usingApi } from "./api";
 import { igFetch } from "./tab";
+
+type ImageResponse = { ok: boolean; body: Buffer; headers: Record<string, string> };
+
+/**
+ * An image off Instagram's CDN.
+ *
+ * Through the browser it is fetched by the page, as the page would. Through
+ * the API there is no browser, and none is needed: CDN URLs are signed for
+ * whoever holds them, so a plain request with no cookies gets the same bytes.
+ */
+async function fetchImage(url: string): Promise<ImageResponse> {
+  if (!(await usingApi())) return igFetch(url);
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    return {
+      ok: response.ok,
+      body: Buffer.from(await response.arrayBuffer()),
+      headers: Object.fromEntries(response.headers.entries()),
+    };
+  } catch {
+    return { ok: false, body: Buffer.alloc(0), headers: {} };
+  }
+}
 
 const EXTENSIONS: Record<string, string> = {
   "image/jpeg": ".jpg",
@@ -48,7 +72,7 @@ export async function downloadThumbnail(
   if (!url) return null;
   ensureDirs();
 
-  const response = await igFetch(url);
+  const response = await fetchImage(url);
   if (!response.ok) return null;
 
   // Re-encoded on the way in, so the big original is never on disk at all.
@@ -84,7 +108,7 @@ export async function downloadAvatar(
   if (mediaExists(filename)) return filename;
   ensureDirs();
 
-  const response = await igFetch(url);
+  const response = await fetchImage(url);
   if (!response.ok) return null;
 
   try {

@@ -6,6 +6,8 @@ import {
   holdBrowserOpen,
   isSessionKnownDead,
 } from "@/lib/instagram/client";
+import { getApiWatcherState, startApiWatcher, stopApiWatcher } from "@/lib/api-watcher";
+import { usingApi } from "@/lib/instagram/api";
 import { closeInboxTab, currentTab, inboxTab, onTab } from "@/lib/instagram/tab";
 import { observePage } from "@/lib/instagram/observe";
 import { isAwake, msUntilAwake, msUntilBed } from "@/lib/hours";
@@ -118,11 +120,22 @@ const runtime: Runtime = (globalForWatcher.__igWatcher ??= {
 });
 
 export function getWatcherState(): WatcherState {
+  // Whichever one is running. The source can change between calls, but only
+  // one of them is ever enabled at a time.
+  const throughApi = getApiWatcherState();
+  if (throughApi.enabled) return throughApi;
   return { ...runtime.state };
 }
 
 /** Start listening (idempotent). Safe to call on every boot and after a sign-in. */
 export async function startWatcher(): Promise<WatcherState> {
+  // Through the API, the listener waits on the API's own cache instead of a
+  // socket, and the browser this file drives never opens.
+  if (await usingApi()) {
+    if (runtime.state.enabled) await stopWatcher();
+    return startApiWatcher();
+  }
+  await stopApiWatcher();
   runtime.wanted = true;
   runtime.state.enabled = true;
   if (runtime.state.listening && currentTab()) return getWatcherState();
@@ -134,6 +147,7 @@ export async function startWatcher(): Promise<WatcherState> {
 }
 
 export async function stopWatcher(): Promise<WatcherState> {
+  if (getApiWatcherState().enabled) return stopApiWatcher();
   runtime.wanted = false;
   runtime.state.enabled = false;
   await teardown();

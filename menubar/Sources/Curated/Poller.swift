@@ -291,7 +291,7 @@ final class Poller {
         lines.append("App:      \(snapshot.appReachable ? "responding on \(config.localBase.absoluteString)" : (snapshot.appError ?? "down"))")
 
         if let session = snapshot.session {
-            lines.append("Session:  \(session.connected ? "signed in as \(session.username ?? "?")" : "SIGNED OUT")")
+            lines.append("Session:  \(session.connected ? session.summary : session.summary.uppercased())")
         }
         if let watch = snapshot.watch {
             lines.append("Watcher:  \(watch.listening ? "listening" : "not listening"), \(watch.sockets) sockets, \(watch.eventsSeen) events seen")
