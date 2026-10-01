@@ -96,7 +96,7 @@ Why: the sandbox accepts no inbound connections, so the Mac cannot reach the
 VM. Instead the VM dials out over Tailscale and holds a reverse forward:
 
 ```bash
-ssh -N -R 8000:127.0.0.1:8000 marcus@<MAC-TAILSCALE-IP>
+ssh -N -R 8000:127.0.0.1:8000 user@<mac-tailscale-ip>
 ```
 
 The Mac then uses `http://127.0.0.1:8000`.
