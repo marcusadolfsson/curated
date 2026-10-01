@@ -211,6 +211,8 @@ export async function analyzeAndStore(post: Post): Promise<AnalysisResult> {
         analysisCostUsd: result.costUsd,
         analysisError: null,
         analyzedAt: new Date(),
+        // A new description may name a different place, or none: read again.
+        placedAt: null,
       })
       .where(eq(posts.id, post.id));
   } else {

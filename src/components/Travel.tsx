@@ -1,0 +1,221 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import PostPreview from "./PostPreview";
+import type { TravelCountry, TravelPost } from "@/app/api/travel/route";
+
+type TravelData = {
+  countries: TravelCountry[];
+  places: number;
+  regions: number;
+  waiting: boolean;
+  locating: { running: boolean; done: number; total: number; error: string | null };
+};
+
+/**
+ * Every place she has sent, by country and then region.
+ *
+ * A region she keeps coming back to gets its name as a heading with the posts
+ * under it; a place she sent once is a single line. Tapping one opens it in
+ * the same viewer as the feed, moving through the list in the order shown.
+ */
+export default function Travel() {
+  const [data, setData] = useState<TravelData | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+
+  const load = useCallback(async () => {
+    const response = await fetch("/api/travel").catch(() => null);
+    if (response?.ok) setData((await response.json()) as TravelData);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // While the backlog is being placed, watch it fill in.
+  useEffect(() => {
+    if (!data?.locating.running) return;
+    const timer = setInterval(() => void load(), 4_000);
+    return () => clearInterval(timer);
+  }, [data?.locating.running, load]);
+
+  /** Every post in the order the page shows them, for the viewer to step through. */
+  const sequence = useMemo(
+    () => (data?.countries ?? []).flatMap((c) => c.regions.flatMap((r) => r.posts)),
+    [data],
+  );
+
+  const patch = async (id: number, changes: { viewed?: boolean; saved?: boolean; category?: string }) => {
+    await fetch(`/api/posts/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(changes),
+    });
+    await load();
+  };
+
+  const show = (post: TravelPost) => {
+    setOpen(sequence.findIndex((p) => p.id === post.id));
+    if (!post.viewed) void patch(post.id, { viewed: true });
+  };
+
+  const placeBacklog = async () => {
+    await fetch("/api/travel/locate", { method: "POST" });
+    await load();
+  };
+
+  if (!data) return <p className="py-16 text-center text-[14px] text-muted">Finding places</p>;
+
+  const locating = data.locating;
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 pb-24 sm:px-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 pt-10 pb-6">
+        <div>
+          <h1 className="font-serif text-4xl leading-none tracking-tight">Travel</h1>
+          <p className="mt-2 text-[14px] text-muted">
+            {data.places === 0
+              ? "No places yet."
+              : `${data.places} post${data.places === 1 ? "" : "s"} across ${data.regions} place${data.regions === 1 ? "" : "s"} in ${data.countries.length} countr${data.countries.length === 1 ? "y" : "ies"}`}
+          </p>
+        </div>
+        <Link href="/" className="text-[14px] text-accent underline-offset-4 hover:underline">
+          Back to Curated
+        </Link>
+      </header>
+
+      {(locating.running || data.waiting || locating.error) && (
+        <div className="mb-6 rounded-xl bg-sunk px-4 py-3 text-[14px] text-ink-soft">
+          {locating.running ? (
+            <>Placing travel posts on the map: {locating.done} of {locating.total}.</>
+          ) : locating.error ? (
+            <>Placing stopped: {locating.error}</>
+          ) : (
+            <>
+              Some travel posts have not been placed yet.{" "}
+              <button type="button" onClick={() => void placeBacklog()} className="text-accent underline-offset-4 hover:underline">
+                Place them
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {data.countries.map((country) => (
+        <section key={country.country} className="border-t border-line py-6">
+          <h2 className="flex items-baseline justify-between gap-3">
+            <span className="font-serif text-2xl">{country.country}</span>
+            <span className="text-[13px] text-muted">{country.count}</span>
+          </h2>
+
+          <div className="mt-3 space-y-4">
+            {country.regions.map((region) =>
+              region.posts.length > 1 ? (
+                <div key={region.region}>
+                  <h3 className="flex items-baseline gap-2 text-[15px] font-medium text-ink">
+                    {region.region}
+                    <span className="text-[13px] font-normal text-muted">{region.posts.length}</span>
+                  </h3>
+                  <ul className="mt-1.5 space-y-1">
+                    {region.posts.map((post) => (
+                      <PlaceRow key={post.id} post={post} title={post.place ?? region.region} onOpen={show} />
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <ul key={region.region}>
+                  <PlaceRow
+                    post={region.posts[0]}
+                    title={region.posts[0].place ?? region.region}
+                    // The region, when the place's own name does not already say it.
+                    detail={
+                      region.posts[0].place && !region.posts[0].place.includes(region.region)
+                        ? region.region
+                        : null
+                    }
+                    onOpen={show}
+                  />
+                </ul>
+              ),
+            )}
+          </div>
+        </section>
+      ))}
+
+      {open !== null && sequence[open] && (
+        <PostPreview
+          sequence={sequence}
+          index={open}
+          onIndexChange={(index) => {
+            setOpen(index);
+            const post = sequence[index];
+            if (post && !post.viewed) void patch(post.id, { viewed: true });
+          }}
+          onClose={() => setOpen(null)}
+          onToggleSaved={(id, saved) => patch(id, { saved })}
+          onReact={async (id, emoji) => {
+            const response = await fetch(`/api/posts/${id}/react`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(emoji ? { emoji } : {}),
+            });
+            if (!response.ok) {
+              const body = (await response.json()) as { error?: string };
+              throw new Error(body.error ?? "That reaction did not send.");
+            }
+            void load();
+          }}
+          onReply={async (id, text) => {
+            const response = await fetch(`/api/posts/${id}/reply`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ text }),
+            });
+            const body = (await response.json()) as { error?: string | null };
+            void load();
+            return response.ok ? null : (body.error ?? "That reply did not send.");
+          }}
+          onChangeCategory={(id, category) => patch(id, { category })}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlaceRow({
+  post,
+  title,
+  detail = null,
+  onOpen,
+}: {
+  post: TravelPost;
+  title: string;
+  detail?: string | null;
+  onOpen: (post: TravelPost) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(post)}
+        className="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-sunk"
+      >
+        {post.thumbnail ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={post.thumbnail} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+        ) : (
+          <span className="h-14 w-14 shrink-0 rounded-lg bg-sunk" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5 text-[15px] text-ink">
+            {!post.viewed && <span aria-label="unread" className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />}
+            <span className="truncate">{title}</span>
+            {detail && <span className="shrink-0 text-[13px] text-muted">· {detail}</span>}
+          </span>
+          {post.summary && <span className="mt-0.5 line-clamp-2 text-[13px] text-muted">{post.summary}</span>}
+        </span>
+      </button>
+    </li>
+  );
+}
