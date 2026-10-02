@@ -7,6 +7,7 @@ import { DEFAULT_REACTION, REACTION_EMOJI, reactionGuide } from "@/lib/emoji";
 import { MEDIA_DIR } from "@/lib/paths";
 import { mediaExists, mediaPath } from "@/lib/instagram/media";
 import { asInt, getSettings } from "@/lib/settings";
+import { sentenceCase } from "@/lib/sentence-case";
 import { agentEnv, claudeAuth } from "@/lib/claude-auth";
 
 /**
@@ -40,7 +41,7 @@ export type AnalysisResult =
   | { ok: true; analysis: Analysis; model: string | null; costUsd: number }
   | { ok: false; error: string };
 
-const REPLY_GUIDE = `It is a starting point the reader will edit, never sent as is. Write it the way one half of a couple texts the other: first person, one short sentence, maybe two, lowercase-casual is fine, no greeting and no sign-off. React to the specific thing in the post - the dish, the place, the trick - the way you would if you had just watched it. Answer whatever the sender's own note asks or suggests ("should we try this?"). Match the sentiment you just named - do not be warm about something you called forgettable. No hashtags, no marketing tone, at most one emoji and usually none.`;
+const REPLY_GUIDE = `It is a starting point the reader will edit, never sent as is. Write it the way one half of a couple texts the other: first person, one short sentence, maybe two, no greeting and no sign-off. Casual in tone, not in spelling: every sentence starts with a capital letter, "I" is capitalised, names and places keep their capitals, and sentences end with punctuation. React to the specific thing in the post - the dish, the place, the trick - the way you would if you had just watched it. Answer whatever the sender's own note asks or suggests ("should we try this?"). Match the sentiment you just named - do not be warm about something you called forgettable. No hashtags, no marketing tone, at most one emoji and usually none.`;
 
 const SYSTEM_PROMPT = `You write the one line a private feed shows above a post someone shared over Instagram DMs. The reader can already see the picture. Your job is to tell them what they cannot see.
 
@@ -248,7 +249,7 @@ function coerceAnalysis(value: unknown): Analysis | null {
 
   const reaction = typeof record.reaction === "string" ? record.reaction : DEFAULT_REACTION;
 
-  const reply = typeof record.reply === "string" ? record.reply.trim() : "";
+  const reply = typeof record.reply === "string" ? sentenceCase(record.reply.trim()) : "";
 
   const captionStrength =
     typeof record.captionStrength === "string" ? record.captionStrength : null;
@@ -302,7 +303,7 @@ export async function draftReplyFor(post: Post): Promise<string | null> {
     for await (const message of stream) {
       if (message.type !== "result" || message.subtype !== "success") continue;
       const output = message.structured_output as { reply?: unknown } | undefined;
-      if (typeof output?.reply === "string" && output.reply.trim()) return output.reply.trim();
+      if (typeof output?.reply === "string" && output.reply.trim()) return sentenceCase(output.reply.trim());
     }
   } catch (error) {
     console.error(`[reply] could not draft a reply for post ${post.id}:`, error);
@@ -373,3 +374,4 @@ export async function chooseReaction(post: Post): Promise<string | null> {
 export function analysisConcurrency(): number {
   return asInt(process.env.ANALYSIS_CONCURRENCY ?? "2", 2);
 }
+
