@@ -6,7 +6,7 @@ import PostRow from "./PostRow";
 import PostPreview from "./PostPreview";
 import HeaderMenu from "./HeaderMenu";
 import FilterMenu, { type Person } from "./FilterMenu";
-import { ChatIcon, SearchIcon } from "./icons";
+import { ChatIcon, SearchIcon, TravelIcon } from "./icons";
 import type { PostView } from "@/lib/serialize";
 import type { SyncState } from "@/lib/sync";
 import { PHONE, useMediaQuery } from "@/lib/useMediaQuery";
@@ -453,6 +453,9 @@ export default function Feed() {
         </div>
 
         <nav className="-mr-2 flex shrink-0 items-center gap-0.5 pt-0.5 sm:-mr-2.5" aria-label="Pages">
+          <Link href="/travel" aria-label="Travel" title="Travel" className={ICON_BUTTON}>
+            <TravelIcon />
+          </Link>
           <Link href="/chat" aria-label="Chat" title="Chat" className={ICON_BUTTON}>
             <ChatIcon />
           </Link>

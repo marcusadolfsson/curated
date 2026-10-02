@@ -48,7 +48,6 @@ export default function HeaderMenu({ className = "" }: { className?: string }) {
           className="absolute top-full right-0 z-20 mt-2 w-44 overflow-hidden rounded-xl bg-surface p-1.5 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.25)] ring-1 ring-line"
         >
           {[
-            ["/travel", "Travel", "Every place she has sent"],
             ["/report", "Report", "What arrives, and when"],
             ["/setup", "Setup", "Who to follow, and more"],
           ].map(([href, label, hint]) => (
