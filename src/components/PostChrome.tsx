@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { BookmarkIcon, CloseIcon } from "./icons";
 import CategoryMenu from "./CategoryMenu";
 import { CATEGORIES } from "@/lib/categories";
@@ -331,9 +331,17 @@ export default function PostChrome({
     </div>
   );
 
+  // Whose words these are: the summary is Claude's, the caption the poster's.
+  const captionLabel = post.authorUsername ? `Caption by @${post.authorUsername}` : "Original caption";
+
   const words = (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-      {post.summary && <p className="font-serif text-[16px] leading-relaxed text-ink">{post.summary}</p>}
+      {post.summary && (
+        <>
+          <SectionLabel tone="light">Summary by Claude</SectionLabel>
+          <p className="font-serif text-[16px] leading-relaxed text-ink">{post.summary}</p>
+        </>
+      )}
       {post.items.length > 0 && (
         <p className="mt-2 font-serif text-[14px] italic text-muted">{post.items.join(", ")}</p>
       )}
@@ -365,10 +373,17 @@ export default function PostChrome({
           </p>
         </div>
       )}
+      {post.transcript && (
+        <div className="mt-4 border-t border-line pt-3">
+          <SectionLabel tone="light">Said in the reel</SectionLabel>
+          <p className="font-serif text-[13px] leading-relaxed text-ink-soft">{post.transcript}</p>
+        </div>
+      )}
       {post.caption && (
-        <p className="mt-4 border-t border-line pt-3 font-serif text-[13px] leading-relaxed text-muted">
-          {post.caption}
-        </p>
+        <div className="mt-4 border-t border-line pt-3">
+          <SectionLabel tone="light">{captionLabel}</SectionLabel>
+          <p className="whitespace-pre-line font-serif text-[13px] leading-relaxed text-muted">{post.caption}</p>
+        </div>
       )}
     </div>
   );
@@ -639,7 +654,12 @@ export default function PostChrome({
           onTouchMove={onGrabMove}
           onTouchEnd={onGrabEnd}
         >
-          {post.summary && <p className="text-[15px] leading-relaxed text-white">{post.summary}</p>}
+          {post.summary && (
+            <>
+              <SectionLabel tone="dark">Summary by Claude</SectionLabel>
+              <p className="text-[15px] leading-relaxed text-white">{post.summary}</p>
+            </>
+          )}
           {post.items.length > 0 && (
             <p className="mt-2 text-[13px] leading-relaxed text-white/40">{post.items.join("  ·  ")}</p>
           )}
@@ -673,8 +693,17 @@ export default function PostChrome({
               </p>
             </div>
           )}
+          {post.transcript && (
+            <div className="mt-5">
+              <SectionLabel tone="dark">Said in the reel</SectionLabel>
+              <p className="text-[13px] leading-relaxed text-white/70">{post.transcript}</p>
+            </div>
+          )}
           {post.caption && (
-            <p className="mt-4 text-[13px] leading-relaxed text-white/45">{post.caption}</p>
+            <div className="mt-5">
+              <SectionLabel tone="dark">{captionLabel}</SectionLabel>
+              <p className="whitespace-pre-line text-[13px] leading-relaxed text-white/45">{post.caption}</p>
+            </div>
           )}
         </div>
 
@@ -748,5 +777,22 @@ export default function PostChrome({
       {!sheetOpen && floating}
       {sheetOpen && sheet}
     </>
+  );
+}
+
+/**
+ * A small heading over each block of words in the details, so the summary
+ * Claude wrote, what is said in the reel and the poster's own caption cannot
+ * be taken for one another.
+ */
+function SectionLabel({ tone, children }: { tone: "light" | "dark"; children: ReactNode }) {
+  return (
+    <p
+      className={`mb-1 font-sans text-[11px] font-medium uppercase tracking-wide ${
+        tone === "light" ? "text-muted" : "text-white/35"
+      }`}
+    >
+      {children}
+    </p>
   );
 }

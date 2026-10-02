@@ -32,6 +32,8 @@ export type PostView = {
   category: string | null;
   summary: string | null;
   items: string[];
+  /** What is said in a reel, transcribed on the Mac. */
+  transcript: string | null;
   analysisError: string | null;
 };
 
@@ -68,6 +70,7 @@ export function toPostView(post: Post): PostView {
     category: post.category,
     summary: post.summary,
     items: parseItems(post.items),
+    transcript: post.transcript,
     analysisError: post.analysisError,
   };
 }
