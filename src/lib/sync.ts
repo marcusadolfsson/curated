@@ -15,7 +15,7 @@ import {
 import { ApiUnavailableError } from "@/lib/instagram/api";
 import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
-import { fetchPostPreview } from "@/lib/instagram/preview";
+import { previewOrNull } from "@/lib/instagram/preview";
 import { analyzeAndStore, analysisConcurrency } from "@/lib/analyze";
 import { datePending } from "@/lib/dates";
 import { locatePending } from "@/lib/places";
@@ -242,7 +242,7 @@ async function runSync() {
         // A pasted link arrives with nothing attached; the media endpoint fills
         // in the thumbnail and caption the model needs.
         const preview =
-          shared.thumbnailUrl === null ? await fetchPostPreview(shared.shortcode, shared.mediaId) : null;
+          shared.thumbnailUrl === null ? await previewOrNull(shared.shortcode, shared.mediaId) : null;
 
         const thumbnailUrl = shared.thumbnailUrl ?? preview?.imageUrl ?? null;
         const thumbnailFile = await downloadThumbnail(shared.shortcode, thumbnailUrl).catch(
@@ -324,9 +324,31 @@ async function runSync() {
       .from(posts)
       .where(inArray(posts.analysisStatus, ["pending", "error"]));
 
+    // A post whose cover lookup fell over when it arrived gets one more go
+    // here, so it is not described from nothing. Still failing, it waits for
+    // the next sync rather than being described blind.
+    const ready: Post[] = [];
+    for (const post of pending) {
+      if (post.thumbnailUrl || post.thumbnailFile || post.caption || post.authorUsername) {
+        ready.push(post);
+        continue;
+      }
+      const preview = await previewOrNull(post.shortcode, post.mediaId);
+      if (!preview) continue;
+      const fill = {
+        mediaId: post.mediaId ?? preview.mediaId,
+        caption: preview.caption,
+        authorUsername: preview.authorUsername,
+        thumbnailUrl: preview.imageUrl,
+        thumbnailFile: await downloadThumbnail(post.shortcode, preview.imageUrl).catch(() => null),
+      };
+      await db.update(posts).set(fill).where(eq(posts.id, post.id));
+      ready.push({ ...post, ...fill });
+    }
+
     state.phase = "analyzing";
-    state.analysisTotal = pending.length;
-    await analyzeAll(pending, () => {
+    state.analysisTotal = ready.length;
+    await analyzeAll(ready, () => {
       state.postsAnalyzed += 1;
       state.message = `Describing posts (${state.postsAnalyzed} of ${state.analysisTotal})`;
     });

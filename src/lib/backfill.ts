@@ -5,7 +5,7 @@ import { ApiUnavailableError } from "@/lib/instagram/api";
 import { RateLimitedError, ownIdentity } from "@/lib/instagram/client";
 import { collectSharedPosts, fetchThread } from "@/lib/instagram/dm";
 import { downloadThumbnail } from "@/lib/instagram/media";
-import { fetchPostPreview } from "@/lib/instagram/preview";
+import { previewOrNull } from "@/lib/instagram/preview";
 import { isAwake } from "@/lib/hours";
 import { pause } from "@/lib/pace";
 import { pauseAutomation, pauseState } from "@/lib/pause";
@@ -155,7 +155,7 @@ async function run(threadId: string, days: number) {
           }
 
           const preview =
-            shared.thumbnailUrl === null ? await fetchPostPreview(shared.shortcode, shared.mediaId) : null;
+            shared.thumbnailUrl === null ? await previewOrNull(shared.shortcode, shared.mediaId) : null;
           const thumbnailUrl = shared.thumbnailUrl ?? preview?.imageUrl ?? null;
           const thumbnailFile = await downloadThumbnail(shared.shortcode, thumbnailUrl).catch(
             () => null,
