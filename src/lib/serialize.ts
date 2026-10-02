@@ -1,4 +1,5 @@
 import type { Post } from "@/db/schema";
+import { sentenceCase } from "@/lib/sentence-case";
 
 export type PostView = {
   id: number;
@@ -60,7 +61,7 @@ export function toPostView(post: Post): PostView {
     suggestedReaction: post.suggestedReaction,
     replyText: post.replyText,
     note: post.note,
-    draftReply: post.draftReply,
+    draftReply: post.draftReply ? sentenceCase(post.draftReply) : null,
     repliedAt: post.repliedAt?.toISOString() ?? null,
     reactionError: post.reactionError,
     analysisStatus: post.analysisStatus,

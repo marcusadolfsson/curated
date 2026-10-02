@@ -705,13 +705,7 @@ export default function PostChrome({
             </label>
             <div className="flex items-center justify-between gap-3 px-1 pt-1.5 text-[12px]">
               <span className={`min-w-0 truncate ${replyError || noteError ? "text-danger" : "text-white/40"}`}>
-                {replyError ??
-                  noteError ??
-                  (hasDraft && draft && !replied
-                    ? "A draft, from reading the post. Edit it before sending."
-                    : sent
-                      ? `Reacted ${sent}`
-                      : "Replies on this post in the thread.")}
+                {replyError ?? noteError ?? (sent ? `Reacted ${sent}` : "")}
               </span>
               <span className="flex shrink-0 items-center gap-3">
                 {!replied && post.analysisStatus === "done" && (
@@ -729,7 +723,7 @@ export default function PostChrome({
                     type="button"
                     onClick={addNote}
                     disabled={!draft.trim()}
-                    className="rounded-full border border-white/25 px-3.5 py-1.5 text-[13px] text-white transition-opacity hover:bg-white/10 disabled:opacity-40"
+                    className="text-[13px] text-white/75 underline-offset-4 hover:text-white hover:underline disabled:opacity-40"
                   >
                     {note ? "Save Note" : "Add Note"}
                   </button>
