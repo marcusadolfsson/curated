@@ -1,7 +1,7 @@
 # Instagram REST API — replication guide
 
 > Audience: another Muse instance tasked with rebuilding this service.
-> Everything below was true of the original as of 2026-10-01 (v1.6.3).
+> Everything below was true of the original as of 2026-10-02 (v1.6.4).
 
 ## 1. What it is
 
@@ -75,7 +75,7 @@ else is stdlib (`urllib` for the oEmbed fetch — there is deliberately no
 | | | Drain: `drain_outbound_queue.py` (run by the `outbound-queue-sender` cron every 30s) invokes the CLIs directly under an flock'd queue file. That scheduled task carries the standing Allow for sending — grant it in the task's Allow setting, then enable the task. |
 | GET  | `/dms/updates?since=&wait=` | New-message event feed backed by a server-side poller (see §5). |
 | GET  | `/posts/by-url?url=` | Resolves a `/p/<code>/` or `/reel/<code>/` share URL via Instagram's public oEmbed endpoint (no login). Returns caption, author (username/url/id), classic media ID, thumbnail URL + dimensions, embed HTML. Cached 24h per shortcode in `agent_msgs/oembed_cache.json`. Accepts `/reels/` and normalizes it. 400 for non-Instagram or non-post URLs, 404 when Instagram can't resolve the URL (deleted/private post). |
-| GET  | `/posts/video?url=` | Direct MP4 URL for a shared reel/video post via yt-dlp (no login). Returns a short-lived CDN URL — download promptly, re-request on expiry. Cached 6h per shortcode in `agent_msgs/video_cache.json` (short TTL, the URLs expire). 400 bad URL, 422 no playable video (photo post or withheld), 502/504 extraction failed. Occasional use only, not loops. Registered before `/posts/{media_id}` so "video" isn't captured as an ID. |
+| GET  | `/posts/video?url=` | Direct MP4 URL for a shared reel/video post via yt-dlp (no login). Returns a short-lived CDN URL — download promptly, re-request on expiry. Cached 6h per shortcode in `agent_msgs/video_cache.json` (short TTL, the URLs expire). Selection: ffprobe-verified H.264+audio progressive MP4 (highest bitrate) first, then Instagram's progressive video_versions, then any MP4 with video+audio — a video-only stream is never returned (422 when nothing with audio exists). Responses include `vcodec`/`acodec`. 400 bad URL, 422 no playable video (photo post or withheld), 502/504 extraction failed. Occasional use only, not loops. Registered before `/posts/{media_id}` so "video" isn't captured as an ID. |
 | GET  | `/posts/images?url=` | Every image for a shared post/carousel via the logged-out post JSON (same query yt-dlp uses, but yt-dlp itself ignores photos). Returns entries in order as `{type, url, width, height}` with the largest CDN URL per entry; single photos return one item, reels return one video item (same URL `/posts/video` gives). Cached 6h per shortcode in `agent_msgs/image_cache.json`. 400 bad URL, 422 no accessible media, 502/504 extraction failed. Occasional use only. Registered before `/posts/{media_id}`. |
 | GET  | `/posts/{media_id}` | Provider lookup by numeric media ID (caption, owner, permalink, counts, sometimes a thumbnail). Does **not** return video URLs or full-size images. Note: classic shortcode base64-decoding and DM share-URL `?id=` values do **not** resolve here — they are separate ID spaces. |
 | GET  | `/posts/{media_id}/comments`, `/likers`, `/insights` | As named. |
