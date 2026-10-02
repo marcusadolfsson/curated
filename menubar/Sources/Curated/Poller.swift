@@ -67,16 +67,6 @@ final class Poller {
         Task { await refresh() }
     }
 
-    /// Open the sign-in window, then look again so the menu shows it standing
-    /// open rather than waiting out the next tick.
-    func beginSignIn() {
-        act { try await $0.beginSignIn() }
-    }
-
-    func signOut() {
-        act { try await $0.signOut() }
-    }
-
     /// A token fresh from signing in with Claude.
     ///
     /// Through the server when it is up, because that also puts it into the
@@ -124,29 +114,9 @@ final class Poller {
         }
     }
 
-    /// The fallback when the sign-in window cannot get past something.
-    ///
-    /// Instagram rejects a truncated or retired cookie by simply not loading
-    /// the inbox, and the reason comes back in the response - so unlike the
-    /// other actions here, this one has something to say when it fails.
-    func pasteSessionCookie(_ sessionId: String) {
-        Task {
-            let api = CuratedAPI(base: config.localBase)
-            do {
-                let outcome = try await api.setSessionCookie(sessionId)
-                lastActionMessage = outcome.status == "ok"
-                    ? nil
-                    : (outcome.message ?? "That cookie was not accepted.")
-            } catch {
-                lastActionMessage = error.localizedDescription
-            }
-            await refresh()
-        }
-    }
-
     /// What the last write said, when it said anything. Shown in the menu
-    /// until the next one: a token or a cookie that was refused used to fail
-    /// in silence, which reads as the button doing nothing.
+    /// until the next one: a token that was refused used to fail in silence,
+    /// which reads as the button doing nothing.
     private(set) var lastActionMessage: String?
 
     func clearActionMessage() { lastActionMessage = nil }
@@ -190,7 +160,6 @@ final class Poller {
         if next.appReachable {
             next.sync = try? await api.sync()
             next.session = try? await api.session()
-            next.signIn = try? await api.signIn()
             next.claude = try? await api.claudeToken()
 
             if Date().timeIntervalSince(lastCountsCheck) >= countsInterval {
@@ -294,11 +263,7 @@ final class Poller {
             lines.append("Session:  \(session.connected ? session.summary : session.summary.uppercased())")
         }
         if let watch = snapshot.watch {
-            if watch.throughApi {
-                lines.append("Watcher:  \(watch.summary), \(watch.eventsSeen) new messages seen, Instagram checked \(Format.relative(watch.upstreamCheckedAt))")
-            } else {
-                lines.append("Watcher:  \(watch.listening ? "listening" : "not listening"), \(watch.sockets) sockets, \(watch.eventsSeen) events seen")
-            }
+            lines.append("Watcher:  \(watch.summary), \(watch.eventsSeen) new messages seen, Instagram checked \(Format.relative(watch.upstreamCheckedAt))")
             // The watcher only knows syncs it started since the app launched;
             // the server's own record survives a restart.
             lines.append("Last sync: \(Format.relative(watch.lastSyncAt ?? snapshot.sync?.lastRun?.finishedAt))")

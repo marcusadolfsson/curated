@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
-import { RateLimitedError, SessionExpiredError, ownIdentity } from "@/lib/instagram/client";
+import { ApiUnavailableError } from "@/lib/instagram/api";
+import { RateLimitedError, ownIdentity } from "@/lib/instagram/client";
 import { collectSharedPosts, fetchThread } from "@/lib/instagram/dm";
 import { downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
@@ -210,8 +211,8 @@ async function run(threadId: string, days: number) {
       await pauseAutomation("Instagram rate-limited this host during a backfill.");
     }
     state.error =
-      error instanceof SessionExpiredError
-        ? "Instagram signed this session out."
+      error instanceof ApiUnavailableError
+        ? "The Instagram API stopped answering."
         : error instanceof Error
           ? error.message
           : String(error);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { threads } from "@/db/schema";
 import { fetchInbox } from "@/lib/instagram/dm";
-import { SessionExpiredError } from "@/lib/instagram/client";
+import { ApiUnavailableError } from "@/lib/instagram/api";
 import { asInt, getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -43,8 +43,8 @@ export async function POST() {
     return NextResponse.json({ found: inbox.length });
   } catch (error) {
     const message =
-      error instanceof SessionExpiredError
-        ? "Instagram signed this session out. Sign in again on this page."
+      error instanceof ApiUnavailableError
+        ? "The Instagram API is not answering. The tunnel from Muse may be down."
         : error instanceof Error
           ? error.message
           : String(error);

@@ -1,14 +1,15 @@
 import * as api from "./api";
-import { noteIdentity } from "./client";
-import { igJson } from "./tab";
 
 /**
  * Reading shared posts out of DMs.
  *
- * Instagram keeps renaming the envelope a shared post arrives in - `media_share`,
- * `clip`, `story_share`, and lately the `xma_*` shapes - so rather than matching
- * on `item_type`, we walk each message's JSON and pick out anything that looks
- * like a post: an object carrying a shortcode, or a plain instagram.com link.
+ * The messages come from the Instagram API, converted in api.ts into the item
+ * shape this was written against when the app read Instagram's private API
+ * through a browser. That shape kept being renamed - `media_share`, `clip`,
+ * `story_share`, the `xma_*` forms - so rather than matching on `item_type`,
+ * each message is walked for anything that looks like a post: an object
+ * carrying a shortcode, or a plain instagram.com link. Through the API every
+ * share is the second kind.
  */
 
 export type DmUser = { id: string; username: string; avatarUrl: string | null };
@@ -55,59 +56,14 @@ const SHORTCODE_RE = /^[A-Za-z0-9_-]{5,30}$/;
 export const INBOX_PAGE = 20;
 export const THREAD_PAGE = 20;
 
+/** The inbox's most recent threads. */
 export async function fetchInbox(limit: number = INBOX_PAGE): Promise<DmThreadSummary[]> {
-  if (await api.usingApi()) return api.inbox(limit);
-
-  // The same shape the inbox page itself requests, so the call is not a new
-  // kind of request from this session.
-  const query = new URLSearchParams({
-    persistentBadging: "true",
-    folder: "",
-    limit: String(Math.min(Math.max(limit, 1), INBOX_PAGE)),
-    thread_message_limit: "10",
-  });
-
-  const data = await igJson<{
-    inbox?: { threads?: Json[] };
-    viewer?: { username?: string; pk?: string | number };
-  }>(`/api/v1/direct_v2/inbox/?${query}`);
-
-  // The inbox says who is reading it; no separate identity call needed.
-  if (data.viewer?.username) {
-    void noteIdentity(data.viewer.username, data.viewer.pk != null ? String(data.viewer.pk) : null);
-  }
-
-  return (data.inbox?.threads ?? []).map(toThreadSummary).filter((t): t is DmThreadSummary => t !== null);
+  return api.inbox(limit);
 }
 
 /** One page of a thread - the newest 20 messages, or the 20 before `cursor`. */
 export async function fetchThread(threadId: string, cursor?: string | null): Promise<DmThread> {
-  if (await api.usingApi()) return api.thread(threadId, cursor);
-
-  const query = new URLSearchParams({
-    visual_message_return_type: "unseen",
-    direction: "older",
-    limit: String(THREAD_PAGE),
-  });
-  if (cursor) query.set("cursor", cursor);
-
-  const data = await igJson<{
-    thread?: {
-      items?: Json[];
-      users?: Json[];
-      thread_v2_id?: string;
-      oldest_cursor?: string;
-      has_older?: boolean;
-    };
-  }>(`/api/v1/direct_v2/threads/${encodeURIComponent(threadId)}/?${query}`);
-
-  return {
-    items: data.thread?.items ?? [],
-    users: toUsers(data.thread?.users),
-    threadV2Id: str(data.thread?.thread_v2_id),
-    oldestCursor: str(data.thread?.oldest_cursor),
-    hasOlder: data.thread?.has_older === true,
-  };
+  return api.thread(threadId, cursor);
 }
 
 /**
@@ -284,36 +240,6 @@ export function extractSharedPosts(item: Json): SharedPost[] {
   }
 
   return [...found.values()];
-}
-
-function toThreadSummary(thread: Json): DmThreadSummary | null {
-  const threadId = str(thread.thread_id) ?? str(thread.thread_v2_id);
-  if (!threadId) return null;
-
-  const users = toUsers(thread.users);
-
-  return {
-    threadId,
-    threadV2Id: str(thread.thread_v2_id),
-    title: str(thread.thread_title) || users.map((u) => u.username).join(", ") || threadId,
-    users,
-    lastActivityAt: microsecondsToDate(thread.last_activity_at),
-  };
-}
-
-function toUsers(value: unknown): DmUser[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter(isJson)
-    .map((user) => ({
-      id: str(user.pk) ?? "",
-      username: str(user.username) ?? "",
-      // Instagram sends this beside the name and it was being dropped. Like
-      // every CDN URL here it is signed and short-lived, so it is only useful
-      // long enough to copy the picture locally.
-      avatarUrl: str(user.profile_pic_url) ?? null,
-    }))
-    .filter((user) => user.id !== "" && user.username !== "");
 }
 
 function looksLikeMedia(node: Json): boolean {

@@ -41,7 +41,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     threadV2Id: thread.threadV2Id,
     text,
     replyToMessageId: post.messageId,
-    replyToItemId: post.itemId,
   });
 
   if (outcome.ok) {

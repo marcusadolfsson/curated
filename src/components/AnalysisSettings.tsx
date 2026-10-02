@@ -15,7 +15,6 @@ type Settings = {
   analysisInstructions: string;
   inboxLimit: string;
   historyDays: string;
-  headless: string;
   autoAnalyze: string;
   realtime: string;
   autoReact: string;

@@ -10,12 +10,12 @@ import { relativeTime } from "@/lib/time";
  * The feed waits minutes before looking, because a post is not urgent and a
  * process that answers a notification in eight seconds does not look like a
  * person. A chat is the other case entirely: someone is typing to you and
- * waiting. So this reads the thread the instant the inbox socket stirs -
+ * waiting. So this reads the thread the moment a new message is seen -
  * which is only ever while this page is open and visible, the same as any
- * browser tab left on a conversation.
+ * tab left on a conversation.
  *
- * The socket is the trigger; the slow timer underneath is only there in case
- * the socket is down.
+ * The watcher is the trigger: when it sees the thread change, this reads it
+ * again. The slow timer underneath is only there in case the watcher is down.
  */
 
 type Message = {
@@ -152,8 +152,8 @@ export default function Chat() {
     [load],
   );
 
-  // The socket is the doorbell: when the watcher hears something and this page
-  // is in front of you, read the thread straight away.
+  // The watcher is the doorbell: when it sees a new message and this page is
+  // in front of you, read the thread straight away.
   useEffect(() => {
     const listen = async () => {
       if (document.visibilityState === "hidden") return;

@@ -98,96 +98,77 @@ spine of the whole thing, so the pile empties instead of accumulating.
 
 ## What happens to a post
 
-1. Signs in to Instagram with a real browser and keeps the session on disk.
-2. Reads your DMs and pulls out every post and reel shared with you.
-3. Copies each thumbnail locally, because Instagram's image URLs expire.
+1. Notices a new message: the Instagram API keeps a feed of what arrived, and
+   Curated waits on it.
+2. Reads the conversation and pulls out every post and reel shared in it.
+3. Looks each one up by its link for the cover and caption, and copies the
+   cover locally, because Instagram's image URLs expire.
 4. Sends each post to Claude, which looks at the picture and the caption and
    writes a short description, a category, the concrete things it names, and the
    emoji it deserves.
-5. Reacts to the message in the thread with that emoji.
+5. Reacts to the message in the thread with that emoji, when you ask it to.
 
 ## How it works, and why
 
-**Reading DMs.** Instagram's Graph API cannot do this — DM access requires a
-business account wired to a Facebook page, and the messaging endpoints do not
-return what you need even then. So the app drives Chromium, signs in, and calls
-the same JSON endpoints instagram.com itself calls. That is far steadier than
-scraping the DM page, which changes constantly.
+**Reading DMs.** Through an Instagram API service that wraps an authorised Meta
+product and holds the account's session. Curated never signs in to Instagram
+itself and runs no browser. The service runs on another machine, which accepts
+no inbound connections, so it keeps a reverse SSH tunnel open to the Mac and
+answers there as `http://127.0.0.1:8000`, with an `X-API-Key` that Curated
+reads from `~/.curated/instagram-api-key`. Its code is in
+[`instagram-api/`](instagram-api/), and
+[`docs/instagram-api.md`](docs/instagram-api.md) describes how to stand it up.
 
-Shared posts arrive in several message shapes that Instagram keeps renaming —
-`media_share`, `clip`, `story_share`, and lately the `xma_*` forms. Rather than
-matching on `item_type`, each message is searched for anything carrying a post
-shortcode or an instagram.com link. Bare links get their thumbnail and caption
-from the post page's Open Graph tags.
+It polls the inbox itself, every five minutes, and keeps what it saw as
+`/dms/updates`. Curated long-polls that feed - a request that goes to the API
+and no further - so a sync runs only when somebody actually sent something,
+and nothing on the Mac ever asks Instagram "anything new?". When it does sync,
+it reads each followed conversation back to wherever the last sync finished.
+
+Shared posts arrive as links. Each message is searched for anything carrying a
+post shortcode or an instagram.com link, rather than matched on a message type
+that Instagram keeps renaming. The link is looked up through the API's
+`/posts/by-url` for the caption, author and cover, which it resolves with
+Instagram's public oEmbed lookup, without the account. A reel's video comes
+from `/posts/video` and every photo of a carousel from `/posts/images`, both
+found logged-out and handed back as signed CDN links that Curated downloads at
+once.
 
 **Describing posts.** Each post goes to Claude through the
 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk), which drives the
-Claude Code installed on the machine — so it uses your existing Claude
+Claude Code installed on the machine - so it uses your existing Claude
 credentials and needs no API key. The agent gets one tool, `Read`, pointed at
-the downloaded thumbnail. Most reels say nothing useful in the caption, and the
-picture is the only real signal.
+the downloaded cover. The caption is where most of the facts live; the picture
+fills the gaps, and carries the posts whose caption says nothing.
 
-**Reacting.** Instagram's web client does not react over REST; the
-`direct_v2/.../react` style endpoints all 404. It sends a Relay mutation,
-`IGDirectReactionSendMutation`, and the identifiers are not the ones the DM API
-hands back: the message is addressed by its `mid.$...` message id rather than
-`item_id`, and the thread by its `thread_v2_id` rather than `thread_id`. Both
-were read out of Instagram's own JavaScript bundle. If reactions start failing
-with a GraphQL error rather than a network one, the persisted-query id in
-`src/lib/instagram/react.ts` is the first thing to re-check.
-
-**Or through an API, with no browser at all.** Curated can read Instagram
-through a separate Instagram API service instead of its own Chromium. The
-service answers on `http://127.0.0.1:8000` (in practice through an SSH tunnel
-it opens to the Mac), takes an `X-API-Key` read from
-`~/.curated/instagram-api-key`, and offers the inbox, threads, sending,
-reactions, a post lookup by link, and `/dms/updates` - its own cache of new
-messages, which it refreshes from Instagram on a schedule. Curated long-polls
-that cache, so a sync runs only when somebody actually sent something.
-
-Switch with `POST /api/source` and `{"source": "api"}` (or `"browser"` to go
-back). It refuses mid-sync, closes the browser before the listener starts, and
-from then on the browser refuses to open at all, so the account never has two
-clients reading at once. Two things are different through the API: a share's
-caption and cover come from the post's public oEmbed lookup, and a reel's
-video comes from the API's `/posts/video`, which finds it without the
-account and hands back a signed CDN link that Curated downloads at once.
-Every photo of a carousel comes the same way, from `/posts/images`.
-Reactions and replies are not sent directly: sending through the API asks for
-approval on its side, one action at a time, so Curated puts them in the API's
-outbound queue (`/dms/react/queue`, `/dms/send/queue`), and a scheduled task
-there with one standing approval sends them within about half a minute.
-Curated checks `/dms/queue` afterwards and takes a reaction back off the post
-if it failed. Until the queue carries `reply_to_message_id`, a reply arrives as
-a plain message rather than quoting the post.
-
-**Where the traffic comes from.** This matters more than anything else here.
-Instagram treats datacenter addresses as suspect: from a cloud VM the login
-endpoint returns 429 while the home page loads fine, and a session cookie minted
-in your browser at home but used from a server is a mismatch it weighs against
-you. Running the browser through a proxy at home fixes both. Without one, expect
-rate limits and, eventually, a locked account.
+**Reacting and replying.** Sending through the API asks for approval on its
+side, one action at a time, so Curated puts reactions and replies in the API's
+outbound queue instead (`/dms/react/queue`, `/dms/send/queue`). A scheduled
+task there with one standing approval sends them within about half a minute,
+and only marks one sent when Instagram's own tool says it was created. Curated
+checks `/dms/queue` afterwards and takes a reaction back off the post if it
+failed. A message is addressed by its `mid.$...` id. Instagram toggles a
+reaction sent twice, so Curated never sends one a post already carries.
 
 ## Requirements
 
-Two, and neither is software:
-
-- **An Instagram account you are willing to automate.** This drives a real
-  browser against a real account, and an account driven too hard gets locked.
-  Most of the design below - the pacing, the six-hour stop, the refusal to
-  retry - exists because of that rather than because of taste.
-- **A residential connection**, or the proxy setting pointed at one. Instagram
-  treats datacentre addresses as suspect, for the reasons above.
+- **The Instagram API, and its tunnel to this Mac.** See
+  [`docs/instagram-api.md`](docs/instagram-api.md). Remote Login on, and the Mac
+  kept awake - the tunnel dies with sleep.
+- **An Instagram account you are willing to automate.** Even through an
+  authorised product, an account driven too hard gets locked. The pacing, the
+  six-hour stop and the refusal to retry exist because of that rather than
+  because of taste.
 
 A **Claude credential** is optional. Without one the app is still a reader - it
 collects, files, saves, reacts and replies; what stops is describing and
 categorising, and the interface removes those rather than showing empty ones.
 The SDK resolves it the way the CLI does: `CLAUDE_CODE_OAUTH_TOKEN`, an
-`ANTHROPIC_API_KEY`, or a login at `~/.claude/.credentials.json`. Paste one
-from `claude setup-token` into the menu bar and it is written to
-`~/.curated/claude-token` and used immediately. Not the keychain: a launchd job
-cannot read it reliably, and a rebooted machine cannot reach it at all until
-somebody signs in at the console.
+`ANTHROPIC_API_KEY`, or a login at `~/.claude/.credentials.json`. *Sign in with
+Claude* in the menu bar runs `claude setup-token` and keeps what it returns in
+`~/.curated/claude-token`. Not the keychain: a launchd job cannot read it
+reliably, and a rebooted machine cannot reach it at all until somebody signs in
+at the console.
 
 **Node 22** matters only if you are running from a checkout - `better-sqlite3`
 has no prebuilt binary for Node 26 and will not compile against its headers, so
@@ -197,28 +178,21 @@ shim against seventeen of its own dylibs and cannot be copied anywhere.
 
 ## Installing
 
-It is one app.
+It is one app. Releases are notarized DMGs; to build it yourself:
 
 ```bash
 cd menubar && make install-standalone
 ```
 
-That builds **Curated.app** - about 390 MB - and puts it in `/Applications`.
-Open it once and it offers to start at login. It carries its own Node and its
-own built server and runs them as a child process, so there is no Homebrew, no
-checkout to keep, no plist to edit and no `sudo`. Everything after that is in
-the menu bar: sign in to Instagram, sign in with Claude, start at login, keep
-the Mac awake.
-
-Chromium is the one thing it does not carry. It is 356 MB, it is somebody
-else's signed code, and putting it inside a signed bundle means signing every
-helper in its framework - so it is downloaded once, on request, into
-Playwright's usual cache.
+That builds **Curated.app** and puts it in `/Applications`. Open it once and it
+offers to start at login. It carries its own Node and its own built server and
+runs them as a child process, so there is no Homebrew, no checkout to keep, no
+plist to edit and no `sudo`. Everything after that is in the menu bar: sign in
+with Claude, start at login, keep the Mac awake.
 
 There was a container and a set of systemd units for the Linux box this used to
-live on; both are gone. Two deployment paths meant reasoning about every change
-twice, and the one nothing ran was reliably the one that had quietly broken.
-Git history has them if a Linux host is ever wanted.
+live on, and a signed-in Chromium for reading Instagram before the API; all of
+it is gone. Git history has them.
 
 ### Working on it
 
@@ -226,87 +200,49 @@ The app bundle is for running it, not for changing it. For that:
 
 ```bash
 npm ci
-npx playwright install chromium
 npm run dev            # http://localhost:3000
 ```
 
 `deploy/mac/` still holds a login agent that runs the server straight from a
 checkout, which is the way to have a working copy running all day. The two are
 mutually exclusive on purpose - the app refuses to start a second server while
-anything answers on the port, because two instances against one Instagram
-session is what gets an account flagged.
+anything answers on the port.
 
 `menubar/` builds without the server too (`make install`), which is the fast
 loop when the menu bar app itself is what you are changing.
 
 ### How it actually runs
 
-On a Mac mini at home. Two pieces, and only the first is Curated:
+On a Mac mini at home. Three pieces, and only the first is Curated:
 
 | Piece | What it is |
 | --- | --- |
 | **Curated.app** | the menu bar app and the server it supervises, `com.curated.app` at login |
-| The tunnel | not Curated's to run. [Tunnelbar](https://github.com/marcusadolfsson/tunnelbar) starts the connector and keeps it up |
+| The Instagram API | on another machine, reached through the tunnel it holds to this Mac |
+| The Cloudflare tunnel | not Curated's to run. [Tunnelbar](https://github.com/marcusadolfsson/tunnelbar) starts the connector and keeps it up |
 
-The tunnel used to be a second login agent here, `com.curated.tunnel`. It is
-gone: one app that understands connectors beats a plist per project, and
-Tunnelbar restarts a connector that dies rather than leaving `KeepAlive` to
-restart it blind.
+It runs in the **logged-in session, not as a daemon**, deliberately: the
+analysis agent borrows the account's own Claude credentials. A daemon has none.
 
-It used to run as a container on a cloud VM, reaching Instagram through an HTTP
-proxy on the NAS so that the traffic left from a residential address rather than
-a datacentre one. Running it at home makes the proxy redundant rather than
-replacing it: the address Instagram sees is the same one it always saw, with one
-fewer thing in the path to be down at three in the morning. It is also a better
-disguise, because the browser is now a genuine macOS Chromium whose user agent
-and client hints agree with the machine underneath, rather than a Linux build
-claiming to be Windows.
+The supervisor waits thirty seconds before a restart, so a server failing at
+boot does not loop, and will not start while anything already answers on the
+port - with one exception it can prove, its own orphan, identified by a pid
+file, because killing the app does not kill the process it started.
 
-It runs in the **logged-in session, not as a daemon**, deliberately: it drives a
-real browser, and the analysis agent borrows the account's own Claude
-credentials. A daemon has neither.
-
-The supervisor keeps the two rules the launch agent had. Thirty seconds before
-a restart, so a server failing at boot does not open a browser at Instagram in
-a loop. And it will not start while anything already answers on the port - with
-one exception it can prove, its own orphan, identified by a pid file, because
-killing the app does not kill the process it started.
-
-One secret sits outside the repo at mode 600, so it is never committed and can
-be rotated on its own:
+Two secrets sit outside the repo at mode 600, so they are never committed and
+can be rotated on their own:
 
 ```
-~/.curated/claude-token    the analysis agent's OAuth token
+~/.curated/claude-token          the analysis agent's OAuth token
+~/.curated/instagram-api-key     the Instagram API's key
 ```
-
-`~/.curated/tunnel-token` is still on disk and nothing here reads it. The
-connector's credentials went with the connector, to Tunnelbar.
 
 ## Setting it up
 
-**Sign in.** From the menu bar: *Sign in to Instagram* opens Instagram's own
-login page in the browser this app already uses, on the profile it has been
-using all along, and keeps whatever cookies Instagram sets. It is not on the
-settings page, because the window opens on the Mac either way - it drives that
-machine's browser, so it was never something a phone could do. You type
-into Instagram, never into Curated - the password is not read, stored or
-replayed here. A checkpoint or a second factor is just a page in front of you.
-The app stops reading Instagram while the window is open, because the window and
-the app share one browser.
-
-Nothing posts a password programmatically, and nothing should: Instagram
-throttles `/accounts/login/` by IP, and every scraper puts the same plaintext
-`#PWD_INSTAGRAM_BROWSER:0:` shape at it, which the real page stopped doing years
-ago.
-
-Pasting a `sessionid` cookie from another browser still works, folded away under
-the button. It is the fallback, and the way a session moves from another
-machine.
-
-**Choose the conversations.** *Refresh conversations* reads your inbox and lists
-who you talk to without importing anything. Tick the ones to follow. With
-nothing ticked, every conversation is read — which is how you find the one worth
-watching, but not what you want long-term.
+**Choose the conversations.** *Refresh conversations* on the Setup page reads
+your inbox and lists who you talk to without importing anything. Tick the ones
+to follow. With nothing ticked, every conversation is read - which is how you
+find the one worth watching, but not what you want long-term.
 
 ## Settings
 
@@ -317,41 +253,23 @@ watching, but not what you want long-term.
 | Extra instructions | Appended to the prompt, so you can steer it without editing code. |
 | Conversations per check | How many inbox threads a sync looks at. |
 | History for a new conversation | How far back to read a conversation the first time. After that a sync reads back to wherever the last one finished. |
+| Listen for new messages | Waits on the API's update feed and syncs when something arrives. Off, posts arrive when you check by hand. |
 | Describe new posts as they arrive | Turn off to import first and describe selectively. |
 | React automatically | Off by default. Reacts once a post has been described. |
-| Newest posts eligible | How far back reactions may reach. See below. |
-| Seconds between reactions | Spacing. Ten is gentle; a burst is not. |
-| Proxy | Where Instagram traffic leaves from. Empty now that it runs at home, so it is no longer on the settings page - `PUT /api/settings` still sets `proxyServer` for a host that needs one. |
 
 ## Safety rails
 
-**The reaction window.** Instagram's DM API does not report existing reactions —
-the thread payload carries no reaction data at all, so the app cannot tell which
-messages you already reacted to by hand. The window is what keeps it off the old
-ones: only the newest N unreacted posts are ever touched. If a post in that
-window already carries your reaction, the app's would replace it, since
-Instagram allows one reaction per person per message.
+**The circuit breaker.** A 429 from Instagram, or from the API in front of it,
+stops the automation for six hours and says so in the feed, with a button to
+resume. The response to Instagram objecting is to stop until a person looks at
+it, not to retry. `/api/pause` also stops it by hand for a day.
 
-**The circuit breaker.** A 429 from Instagram stops the automation for six hours
-and says so in the feed, with a button to resume. The response to Instagram
-objecting is to stop until a person looks at it, not to retry. `/api/pause` also
-stops it by hand for a day.
+**A daily ceiling.** Syncs follow real messages, so this is never reached by
+somebody sharing reels; reaching it means something is looping. It is counted
+from the sync history, so a restart cannot reset it.
 
-**Session checks are cached** for five minutes. Every page load asking whether
-the session is still valid is two authenticated requests, and a session does not
-change minute to minute.
-
-## Scheduling
-
-Mostly there is no schedule. The app keeps a tab open on the DM inbox and
-listens to the realtime sockets the page itself opens; when one stirs it waits a
-minute or five, the way a person does, and then reads. The tab is open from
-seven to eleven and closed overnight.
-
-A sync reads back to wherever the last one finished, however long ago that was.
-That is what makes an outage recoverable: a machine that slept for three days
-catches up on three days rather than on a fixed number of messages, which used
-to leave a hole nothing ever returned to.
+**One client.** Nothing on the Mac signs in to Instagram. The account has one
+session, on the API's side.
 
 ## When something is wrong
 
@@ -366,28 +284,19 @@ Then, for detail:
 
 ```bash
 tail -f ~/Library/Application\ Support/Curated/curated.log   # the app, and the server it runs
-curl -s localhost:3000/api/session                  # signed in?
-curl -s localhost:3000/api/watch                    # is it listening, and on how many sockets
-curl -s -X POST localhost:3000/api/session/egress   # the address Instagram sees
+curl -s localhost:3000/api/session                  # does the Instagram API answer?
+curl -s localhost:3000/api/watch                    # is it listening, and when did the API last check
+curl -s localhost:8000/health                       # the API itself, through the tunnel
 ```
 
-To restart it, quit the app and open it again - the server is its child and
+**The Instagram API is not answering** means the API or its tunnel is down.
+Both are restarted on the API's side within minutes, and the watcher picks up
+where it left off: it asks for everything since the last message it saw.
+
+To restart the app, quit it and open it again - the server is its child and
 stops with it. `launchctl kickstart` will not do it: the login agent runs
 `open -a`, which activates an app that is already running rather than starting
 the new one.
-
-The connector's log is Tunnelbar's now, under
-`~/Library/Application Support/Tunnelbar/logs/`.
-
-Read the session answer literally. **Signed out** means Instagram sent the tab
-to a login page or a challenge, and nothing retries until a cookie is pasted.
-Anything else that fails is a fault: it backs off, doubling up to half an hour,
-and recovers on its own. Those two used to be one test - "the tab is not on
-/direct/" - and an aborted navigation leaving the tab on `about:blank` read as
-being thrown out, condemning a session whose cookie was perfectly good.
-
-**A 429 stops everything for six hours** rather than being retried, and says so
-in the feed with a button to resume.
 
 ## How it is reached
 
@@ -397,18 +306,12 @@ forwarded; the connector dials out.
 
 The connector is started and supervised by
 [Tunnelbar](https://github.com/marcusadolfsson/tunnelbar), which owns it and
-restarts it if it dies. Nothing in this repo starts, stops or configures it, and
-`deploy/mac/` no longer ships a plist for it.
+restarts it if it dies. Nothing in this repo starts, stops or configures it.
 
 The Access policy is attached to the **hostname**, not to the origin, so it
-survives the origin moving. Migrating from the cloud box was a matter of
-standing up a second tunnel and repointing one CNAME - the login page never
-changed.
-
-It is a **separate tunnel** rather than a second connector on the existing one,
-because two connectors on one tunnel are a load-balanced pair: Cloudflare would
-send requests to whichever, and half of them would land on a machine with a
-different database.
+survives the origin moving - and it is the only thing between the internet and
+the app, which has no login of its own. After any hostname change, check that
+an unauthenticated request gets a 302 to the Access login.
 
 ## What lives where
 
@@ -417,58 +320,40 @@ Everything the app writes is under `DATA_DIR`, which is
 
 ```
 insta.db                 posts, threads, settings, sync history
-media/                   thumbnails, cached reels and gallery photos
-session/instagram.json   the Instagram session (mode 600)
-browser/                 Chromium's own profile: history, cache, device state (mode 700)
+media/                   covers, cached reels and gallery photos
 curated.log              the app, and anything it starts
 server.pid               which server this app started, so an orphan can be told apart
 ```
-
-It used to be `./data` inside the checkout. That put a live session and a
-database inside the thing that gets built and copied - the build tracer walked
-into it and pulled 83 MB of it into a bundle - and it meant deleting the repo
-took the data with it. Now the app is disposable and the data is not.
 
 Outside it, deliberately:
 
 ```
 ~/.curated/claude-token                        the analysis agent's OAuth token (mode 600)
+~/.curated/instagram-api-key                   the Instagram API's key (mode 600)
 ~/Library/LaunchAgents/com.curated.app.plist   Curated at login
-~/Library/Caches/ms-playwright/                Chromium, shared and re-downloadable
 ```
 
-The connector's state belongs to Tunnelbar and lives under
-`~/Library/Application Support/Tunnelbar/`.
-
-Treat `session/` and `browser/` as passwords: anyone holding either is signed in
-as you. The media is worth keeping too - those CDN links expired hours after
-they were fetched, so the only other way to get a thousand thumbnails back is a
-thousand requests to Instagram.
+The media is worth keeping: those CDN links expired hours after they were
+fetched, so the only other way to get a thousand covers back is a thousand
+lookups.
 
 ## Known limits
 
 - A reel is judged from its cover frame and caption, not the video, so a reel
   whose point only appears mid-video gets a thin description.
-- Only posts a sync has actually read carry the message id reactions need.
-  Older posts can be described but not reacted to.
-- The DM endpoints and the reaction mutation are the website's own, not a
-  documented API. They change. Extraction is written defensively, but a sync
-  that suddenly finds nothing usually means a message shape changed.
-- A session cookie is the only way in. Instagram challenges automated logins
-  from a new device or location, and the login endpoint is throttled by IP.
+- Reactions cannot be taken back through the API.
+- The API's conversation view carries no reactions, so Curated cannot see a
+  reaction made in Instagram itself.
 - **The chat view opens one conversation, and there is no way to switch.** The
   feed handles as many people as you follow, and replying to a post always goes
   back to the thread that post came from. The standalone chat is the exception:
-  it takes whichever followed conversation the database returns first. The
-  endpoint behind it already accepts a thread, so what is missing is the picker
-  in front of it.
+  it takes whichever followed conversation spoke most recently.
 
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
 
-It drives Instagram with a real browser and a real session, which is yours to
-account for: automation is against their terms, and an account driven hard
-enough gets locked. The pacing here is deliberately slow for that reason. Run
+It reads a real Instagram account, which is yours to account for: an account
+driven hard enough gets locked, whatever reads it. The pacing here is deliberately slow for that reason. Run
 it on your own account, and read the safety rails above before changing any of
 the waits.

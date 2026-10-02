@@ -91,47 +91,15 @@ struct CuratedAPI {
         try await HTTP.get(SessionPayload.self, from: base.appending(path: "api/session"))
     }
 
-    func signIn() async throws -> SignInPayload {
-        try await HTTP.get(SignInPayload.self, from: base.appending(path: "api/session/signin"))
-    }
-
     func claudeToken() async throws -> ClaudeTokenPayload {
         try await HTTP.get(ClaudeTokenPayload.self, from: base.appending(path: "api/claude/token"))
     }
 
     // MARK: - The writes
     //
-    // Signing in and out, and the analysis credential. Each one is something
-    // you reach for when the app has stopped doing its job, which is when the
-    // menu bar is where you are looking. Everything else here stays a read.
-
-    /// Opens Instagram's login page in Curated's own browser. The app stops
-    /// reading Instagram while the window stands open.
-    @discardableResult
-    func beginSignIn() async throws -> SignInPayload {
-        try await write("api/session/signin", method: "POST", body: nil, as: SignInPayload.self)
-    }
-
-    /// Deletes the saved session. The app cannot read anything afterwards
-    /// until somebody signs in again.
-    func signOut() async throws {
-        var request = URLRequest(url: base.appending(path: "api/session"))
-        request.httpMethod = "DELETE"
-        _ = try await HTTP.session.data(for: request)
-    }
-
-    /// The pasted-cookie fallback. Only the sessionid: ds_user_id was always
-    /// optional, and who the session belongs to is read off the inbox page it
-    /// loads rather than taken on trust from a second field.
-    @discardableResult
-    func setSessionCookie(_ sessionId: String) async throws -> LoginOutcomePayload {
-        try await write(
-            "api/session/cookie",
-            method: "POST",
-            body: try JSONSerialization.data(withJSONObject: ["sessionId": sessionId]),
-            as: LoginOutcomePayload.self
-        )
-    }
+    // The analysis credential. Something you reach for when the app has
+    // stopped doing its job, which is when the menu bar is where you are
+    // looking. Everything else here stays a read.
 
     @discardableResult
     func setClaudeToken(_ token: String) async throws -> ClaudeTokenPayload {

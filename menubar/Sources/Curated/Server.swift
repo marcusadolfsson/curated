@@ -142,9 +142,6 @@ final class Server {
         env["HOSTNAME"] = "127.0.0.1"
         env["DATA_DIR"] = Paths.dataDirectory.path
         env["MIGRATIONS_DIR"] = root.appending(path: "drizzle").path
-        // Chromium is 356 MB and is not in the bundle; it lives beside the
-        // data, fetched once. See Browser.swift.
-        env["PLAYWRIGHT_BROWSERS_PATH"] = Paths.browsersDirectory.path
         if let token = Paths.claudeToken() {
             env["CLAUDE_CODE_OAUTH_TOKEN"] = token
         }

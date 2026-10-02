@@ -119,14 +119,10 @@ struct MenuView: View {
                     value: watch.summary,
                     tone: watch.listening ? .good : (watch.enabled ? .bad : .plain)
                 )
-                if watch.throughApi {
-                    // The listener only reads the API's cache; this is when
-                    // the API last asked Instagram, so how fresh "nothing" is.
-                    Row("Checked", value: Format.relative(watch.upstreamCheckedAt))
-                    Row("Last message", value: Format.relative(watch.lastEventAt))
-                } else {
-                    Row("Last event", value: Format.relative(watch.lastEventAt))
-                }
+                // The watcher only reads the API's cache; this is when the
+                // API last asked Instagram, so how fresh "nothing" is.
+                Row("Checked", value: Format.relative(watch.upstreamCheckedAt))
+                Row("Last message", value: Format.relative(watch.lastEventAt))
             }
 
             if let sync = snapshot.sync {
@@ -244,50 +240,6 @@ struct MenuView: View {
 
             // The writes. Each one asks first: a menu is easy to hit by
             // accident, and every item below costs something to undo.
-            if snapshot.session?.throughApi == true {
-                // Read through the API: the session lives on Muse, and there
-                // is no browser here to sign in or out of.
-                EmptyView()
-            } else if let signIn = snapshot.signIn, signIn.working {
-                MenuButton("Signing in - see the window", shortcut: nil) {
-                    openURL(poller.config.localBase.appending(path: "setup"))
-                }
-            } else if snapshot.session?.connected == true {
-                MenuButton("Sign out of Instagram...", shortcut: nil) {
-                    Dialogs.confirm(
-                        "Sign out of Instagram?",
-                        message: "The saved session is deleted and Curated stops reading "
-                            + "anything until you sign in again. Signing back in is a fresh "
-                            + "login, which is the one thing worth doing rarely.",
-                        action: "Sign Out",
-                        destructive: true
-                    ) { poller.signOut() }
-                }
-            } else {
-                MenuButton("Sign in to Instagram...", shortcut: nil) {
-                    Dialogs.confirm(
-                        "Sign in to Instagram?",
-                        message: "Curated stops reading Instagram while the window is open - "
-                            + "it and the window share one browser. You type into Instagram's "
-                            + "own page; your password never reaches Curated.",
-                        action: "Open the Window"
-                    ) { poller.beginSignIn() }
-                }
-                // The fallback, next to the thing it is a fallback for, and
-                // only when signed out - which is the only time it is any use.
-                MenuButton("Paste a session cookie...", shortcut: nil) {
-                    Dialogs.prompt(
-                        "Paste a session cookie",
-                        message: "The fallback for when the sign-in window cannot get past "
-                            + "something. Sign in at instagram.com in your own browser, then "
-                            + "copy the sessionid cookie from developer tools. Keep that "
-                            + "browser signed in: logging out there ends this session too.",
-                        placeholder: "sessionid",
-                        action: "Use It"
-                    ) { poller.pasteSessionCookie($0) }
-                }
-            }
-
             if ClaudeSignIn.available {
                 MenuButton(
                     ClaudeSignIn.shared.running
@@ -296,23 +248,6 @@ struct MenuView: View {
                     shortcut: nil
                 ) {
                     ClaudeSignIn.shared.start(poller: poller)
-                }
-            }
-
-            // Only in a bundle that carries its own server and has not got a
-            // browser yet. 356 MB is not something to start without asking.
-            if Server.shared.isHost, snapshot.session?.throughApi != true {
-                switch Browser.shared.state {
-                case .fetching:
-                    MenuButton("Downloading Chromium...", shortcut: nil) {}
-                case .present:
-                    EmptyView()
-                case .failed(let why):
-                    MenuButton("Chromium: \(why)", shortcut: nil) { Browser.shared.fetch() }
-                case .unknown:
-                    MenuButton("Download Chromium (356 MB)...", shortcut: nil) {
-                        Browser.shared.fetch()
-                    }
                 }
             }
 

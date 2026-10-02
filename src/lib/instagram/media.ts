@@ -1,20 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MEDIA_DIR, ensureDirs } from "@/lib/paths";
-import { usingApi } from "./api";
-import { igFetch } from "./tab";
-
 type ImageResponse = { ok: boolean; body: Buffer; headers: Record<string, string> };
 
 /**
- * An image off Instagram's CDN.
- *
- * Through the browser it is fetched by the page, as the page would. Through
- * the API there is no browser, and none is needed: CDN URLs are signed for
- * whoever holds them, so a plain request with no cookies gets the same bytes.
+ * An image off Instagram's CDN. The URLs are signed for whoever holds them,
+ * so a plain request with no cookies gets the bytes.
  */
 async function fetchImage(url: string): Promise<ImageResponse> {
-  if (!(await usingApi())) return igFetch(url);
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     return {

@@ -194,8 +194,8 @@ to hit by accident.
 
 Everything else stays a read. It does not start a sync, start or stop the
 watcher, or pause anything, because on this app those are not idle verbs - and
-restarting mid-sync closes a live browser session against an account Instagram
-is happy to lock. Those belong in a terminal, where they are deliberate.
+restarting mid-sync cuts off a sync halfway through reading an account
+Instagram is happy to lock. Those belong in a terminal, where they are deliberate.
 
 The one request it makes off the machine is the reachability probe, once a
 minute, to your own hostname. It never touches Instagram.

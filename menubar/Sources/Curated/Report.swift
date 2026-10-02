@@ -51,9 +51,6 @@ enum CommandLineReport {
         var output = ""
 
         Task { @MainActor in
-            // The app checks for Chromium at launch; this copy of it never
-            // launched, so without this it offers a download that is not needed.
-            Browser.shared.check()
             let poller = Poller.shared
             await poller.refresh()
 
