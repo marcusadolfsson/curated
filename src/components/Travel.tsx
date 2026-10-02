@@ -331,7 +331,14 @@ function groupPosts(posts: TravelPost[]): Group[] {
     .sort((a, b) => b.count - a.count || a.country.localeCompare(b.country));
 }
 
-/** Everything inside the area the map shows, under it. */
+/**
+ * Everything inside the area the map shows, under it.
+ *
+ * With several places in view each one is a folded line - a count and an
+ * unread dot - opened by a tap, the same as the A–Z list; a long scroll of
+ * posts under a map of a continent answers nothing. Zoomed in to a single
+ * place there is nothing to choose between, so its posts show straight away.
+ */
 function InView({
   groups,
   total,
@@ -341,6 +348,19 @@ function InView({
   total: number;
   onOpen: (post: TravelPost) => void;
 }) {
+  /** Places opened by hand. Kept while the map moves, so a pan does not shut them. */
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const toggle = (key: string) =>
+    setOpened((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const places = groups.reduce((sum, group) => sum + group.places.length, 0);
+  const folded = places > 1;
+
   const summary =
     groups.length === 0
       ? "nothing in this part of the map"
@@ -359,28 +379,58 @@ function InView({
         <span className="text-muted"> · {summary}</span>
       </p>
 
-      <div className="mt-2 space-y-5">
+      <div className="mt-2 space-y-4">
         {groups.map((group) => (
           <section key={group.country} className="border-t border-line pt-3">
             <h2 className="flex items-baseline justify-between font-serif text-xl">
               {group.country}
               <span className="font-sans text-[13px] text-muted">{group.count}</span>
             </h2>
-            {group.places.map((place) => (
-              <div key={place.region} className="mt-2">
-                {group.places.length > 1 && (
-                  <p className="flex items-baseline gap-2 px-2 text-[14px] font-medium text-ink">
-                    {place.region === group.country ? `Across ${place.region}` : place.region}
-                    <span className="text-[12px] font-normal text-muted">{place.posts.length}</span>
-                  </p>
-                )}
-                <ul className="mt-0.5 space-y-1">
+
+            {folded ? (
+              <ul className="mt-1.5">
+                {group.places.map((place) => {
+                  const key = regionKey(group.country, place.region);
+                  const isOpen = opened.has(key);
+                  const single = place.posts.length === 1 ? place.posts[0] : null;
+                  const label =
+                    place.region === group.country ? `Across ${place.region}` : (single?.city ?? place.region);
+                  const unread = place.posts.filter((post) => !post.viewed).length;
+                  return (
+                    <li key={place.region}>
+                      <button
+                        type="button"
+                        aria-expanded={isOpen}
+                        onClick={() => toggle(key)}
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-sunk"
+                      >
+                        <Chevron open={isOpen} />
+                        <span className="min-w-0 flex-1 truncate text-[15px] text-ink">{label}</span>
+                        {unread > 0 && (
+                          <span aria-label={`${unread} unread`} className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                        )}
+                        <span className="w-6 shrink-0 text-right text-[13px] text-muted">{place.posts.length}</span>
+                      </button>
+                      {isOpen && (
+                        <ul className="mt-0.5 mb-2 space-y-1 pl-6">
+                          {place.posts.map((post) => (
+                            <PlaceRow key={post.id} post={post} title={single ? null : post.place} onOpen={onOpen} />
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              group.places.map((place) => (
+                <ul key={place.region} className="mt-1.5 space-y-1">
                   {place.posts.map((post) => (
                     <PlaceRow key={post.id} post={post} title={post.place ?? post.city} onOpen={onOpen} />
                   ))}
                 </ul>
-              </div>
-            ))}
+              ))
+            )}
           </section>
         ))}
       </div>
