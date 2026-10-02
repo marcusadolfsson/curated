@@ -149,6 +149,8 @@ Three crons keep it alive:
   reconnecting" (e.g. Mac asleep) as healthy, and deliberately never touches
   the API process.
 
+VM replacements are expected and frequent (often hourly): the runtime swaps the VM and every process on it dies. Both watchers check the VM’s boot time (`uptime -s`) before deciding a recovery is worth reporting — when the VM booted less than ~10 minutes ago, a restart is routine and they stay silent (daily log only). Only genuine failures (a component dying on a long-running VM, or a restart that doesn’t fix it) are reported.
+
 ## 8. Replication checklist
 
 1. Confirm `instagram-cli` and `instagram-messages-cli` are installed and
