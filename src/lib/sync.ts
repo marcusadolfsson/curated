@@ -17,7 +17,9 @@ import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
 import { analyzeAndStore, analysisConcurrency } from "@/lib/analyze";
+import { datePending } from "@/lib/dates";
 import { locatePending } from "@/lib/places";
+import { transcribePending, transcriptionAvailable } from "@/lib/transcribe";
 import { pause } from "@/lib/pace";
 import { asBool, asInt, getSettings } from "@/lib/settings";
 import { queueReactions } from "@/lib/reactions";
@@ -308,6 +310,13 @@ async function runSync() {
   //    modal opens on a local file instead of waiting for a download.
   if (added.length > 0) await prefetchVideos(added);
 
+  // 3b. Transcribe what is said in those reels, on this Mac, so the
+  //     description reads it. Does nothing without whisper.cpp installed.
+  if (added.length > 0 && (await transcriptionAvailable())) {
+    state.message = "Listening to the reels";
+    await transcribePending(added);
+  }
+
   // 4. Describe everything that has not been described yet.
   if (asBool(settings.autoAnalyze) && analysisAvailable()) {
     const pending = await db
@@ -328,6 +337,9 @@ async function runSync() {
   if (analysisAvailable()) {
     state.message = "Placing travel posts";
     await locatePending();
+    // 4c. And the dates in anything just described, for Upcoming.
+    state.message = "Finding dates";
+    await datePending();
   }
 
   // 5. Let the sender know it landed - later, one at a time, and only for what

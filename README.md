@@ -141,6 +141,21 @@ credentials and needs no API key. The agent gets one tool, `Read`, pointed at
 the downloaded cover. The caption is where most of the facts live; the picture
 fills the gaps, and carries the posts whose caption says nothing.
 
+**Listening to reels.** A reel's video is downloaded anyway, so what is said
+in it is transcribed on the Mac - [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+on the GPU, with the large-v3-turbo model and Silero voice detection in front
+of it, after `afconvert` (part of macOS) pulls the audio out. The description,
+the Travel places and the Upcoming dates all read the transcript beside the
+caption. Voice detection is not optional in practice: on a reel that is all
+music, Whisper alone writes a confident sentence nobody said. Nothing leaves
+the machine. Without whisper.cpp and its models this switches itself off.
+
+**Upcoming.** A text pass over each described post - the description, the
+caption and the transcript - pulls out the dates worth acting on: tickets going
+on sale, the nights of an event, the last day to book, an opening. The Upcoming
+page lists the ones still ahead by month, each with an *Add to calendar* link
+that serves an `.ics` file.
+
 **Reacting and replying.** Sending through the API asks for approval on its
 side, one action at a time, so Curated puts reactions and replies in the API's
 outbound queue instead (`/dms/react/queue`, `/dms/send/queue`). A scheduled
@@ -159,6 +174,13 @@ reaction sent twice, so Curated never sends one a post already carries.
   authorised product, an account driven too hard gets locked. The pacing, the
   six-hour stop and the refusal to retry exist because of that rather than
   because of taste.
+
+**Transcription** is optional too: `brew install whisper-cpp`, then the two
+models into `models/` under the data directory -
+[`ggml-large-v3-turbo-q5_0.bin`](https://huggingface.co/ggerganov/whisper.cpp)
+(574 MB) and
+[`ggml-silero-v5.1.2.bin`](https://huggingface.co/ggml-org/whisper-vad) (885 KB).
+An M1 transcribes a minute of speech in about ten seconds.
 
 A **Claude credential** is optional. Without one the app is still a reader - it
 collects, files, saves, reacts and replies; what stops is describing and
@@ -255,6 +277,7 @@ find the one worth watching, but not what you want long-term.
 | History for a new conversation | How far back to read a conversation the first time. After that a sync reads back to wherever the last one finished. |
 | Listen for new messages | Waits on the API's update feed and syncs when something arrives. Off, posts arrive when you check by hand. |
 | Describe new posts as they arrive | Turn off to import first and describe selectively. |
+| Transcribe reels | `transcribeReels`: on by default, and does nothing without whisper.cpp. |
 | React automatically | Off by default. Reacts once a post has been described. |
 
 ## Safety rails
@@ -321,6 +344,7 @@ Everything the app writes is under `DATA_DIR`, which is
 ```
 insta.db                 posts, threads, settings, sync history
 media/                   covers, cached reels and gallery photos
+models/                  Whisper and the voice-detection model, for transcribing reels
 curated.log              the app, and anything it starts
 server.pid               which server this app started, so an orphan can be told apart
 ```
@@ -339,8 +363,9 @@ lookups.
 
 ## Known limits
 
-- A reel is judged from its cover frame and caption, not the video, so a reel
-  whose point only appears mid-video gets a thin description.
+- A reel is read from its cover, its caption and what is said in it - not
+  from what it shows after the first frame. A reel whose point is visual and
+  silent still gets a thin description.
 - Reactions cannot be taken back through the API.
 - The API's conversation view carries no reactions, so Curated cannot see a
   reaction made in Instagram itself.

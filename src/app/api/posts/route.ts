@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
       like(posts.items, term),
       like(posts.authorUsername, term),
       like(posts.note, term),
+      like(posts.transcript, term),
     );
     if (match) scope.push(match);
   }
