@@ -39,7 +39,7 @@ type Watcher = { listening: boolean; lastEventAt: string | null; syncsTriggered:
 
 type Pause = { paused: boolean; until: string | null; reason: string | null };
 
-type StateFilter = "unread" | "all" | "read" | "saved" | "notes";
+type StateFilter = "unread" | "all" | "saved" | "notes";
 
 export default function Feed() {
   const [data, setData] = useState<FeedResponse | null>(null);
@@ -520,7 +520,7 @@ export default function Feed() {
             screen too narrow for them, and Filter keeps its place on the end. */}
         <div className="flex items-center gap-x-1 text-[13px] sm:gap-x-1.5">
           <div className="scroll-row -my-1.5 flex min-w-0 items-center gap-x-1 overflow-x-auto py-1.5 sm:gap-x-1.5">
-            {(["unread", "all", "read", "saved", "notes"] as StateFilter[]).map((value) => (
+            {(["unread", "all", "saved", "notes"] as StateFilter[]).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -632,16 +632,14 @@ const ICON_BUTTON =
 const LABELS: Record<StateFilter, string> = {
   unread: "Unread",
   all: "Everything",
-  read: "Read",
   saved: "Saved",
   notes: "Notes",
 };
 
-/** The phone's version of the same four, where the row is 358px wide. */
+/** The phone's version of the same, where the row is 358px wide. */
 const SHORT_LABELS: Record<StateFilter, string> = {
   unread: "Unread",
   all: "All",
-  read: "Read",
   saved: "Saved",
   notes: "Notes",
 };
