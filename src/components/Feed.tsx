@@ -26,6 +26,7 @@ type FeedResponse = {
   total: number;
   unread: number;
   saved: number;
+  notes: number;
   categories: Record<string, number>;
   senders?: Person[];
   /** False when there is no Claude credential: nothing is described or filed. */
@@ -38,7 +39,7 @@ type Watcher = { listening: boolean; lastEventAt: string | null; syncsTriggered:
 
 type Pause = { paused: boolean; until: string | null; reason: string | null };
 
-type StateFilter = "unread" | "all" | "read" | "saved";
+type StateFilter = "unread" | "all" | "read" | "saved" | "notes";
 
 export default function Feed() {
   const [data, setData] = useState<FeedResponse | null>(null);
@@ -372,7 +373,10 @@ export default function Feed() {
     await patch(id, { saved });
   };
 
-  const patch = async (id: number, changes: { viewed?: boolean; saved?: boolean; category?: string }) => {
+  const patch = async (
+    id: number,
+    changes: { viewed?: boolean; saved?: boolean; category?: string; note?: string | null },
+  ) => {
     await fetch(`/api/posts/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -513,7 +517,7 @@ export default function Feed() {
             screen too narrow for them, and Filter keeps its place on the end. */}
         <div className="flex items-center gap-x-1 text-[13px] sm:gap-x-1.5">
           <div className="scroll-row -my-1.5 flex min-w-0 items-center gap-x-1 overflow-x-auto py-1.5 sm:gap-x-1.5">
-            {(["unread", "all", "read", "saved"] as StateFilter[]).map((value) => (
+            {(["unread", "all", "read", "saved", "notes"] as StateFilter[]).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -532,6 +536,9 @@ export default function Feed() {
                 <span className="hidden sm:inline">{LABELS[value]}</span>
                 {value === "saved" && (data?.saved ?? 0) > 0 && (
                   <span className="ml-1.5 tabular-nums opacity-70">{data?.saved}</span>
+                )}
+                {value === "notes" && (data?.notes ?? 0) > 0 && (
+                  <span className="ml-1.5 tabular-nums opacity-70">{data?.notes}</span>
                 )}
               </button>
             ))}
@@ -606,6 +613,7 @@ export default function Feed() {
           onToggleSaved={toggleSaved}
           onReact={react}
           onReply={replyTo}
+          onNote={(id, note) => patch(id, { note })}
           onChangeCategory={(id, category) => patch(id, { category })}
           describing={describing}
         />
@@ -623,6 +631,7 @@ const LABELS: Record<StateFilter, string> = {
   all: "Everything",
   read: "Read",
   saved: "Saved",
+  notes: "Notes",
 };
 
 /** The phone's version of the same four, where the row is 358px wide. */
@@ -631,6 +640,7 @@ const SHORT_LABELS: Record<StateFilter, string> = {
   all: "All",
   read: "Read",
   saved: "Saved",
+  notes: "Notes",
 };
 
 function EmptyState({
@@ -678,14 +688,18 @@ function EmptyState({
           ? "Nothing unread."
           : stateFilter === "saved"
             ? "Nothing saved yet."
-            : "Nothing matches that."}
+            : stateFilter === "notes"
+              ? "No notes yet."
+              : "Nothing matches that."}
       </p>
       <p className="mt-2 text-[14px] text-muted">
         {stateFilter === "unread"
           ? "You are caught up. Switch to Everything to look back."
           : stateFilter === "saved"
             ? "Save a post and it stays here, whether or not you have read it."
-            : "Try a different kind, or clear the search."}
+            : stateFilter === "notes"
+              ? "Add a note on a post - a thought, a plan, a reminder - and it lands here. Notes stay in Curated; they are never sent."
+              : "Try a different kind, or clear the search."}
       </p>
     </div>
   );

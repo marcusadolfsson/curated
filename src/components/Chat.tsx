@@ -24,6 +24,8 @@ type Message = {
   senderId: string | null;
   at: string | null;
   shortcode: string | null;
+  /** The post a reply of yours was about, when Curated sent it. */
+  replyTo?: { id: number; summary: string | null; thumbnail: string | null } | null;
   post: {
     id: number;
     summary: string | null;
@@ -372,6 +374,21 @@ export default function Chat() {
                   <div className="max-w-[80%]">
                     {!mine && (
                       <p className="mb-0.5 pl-3 text-[13px] text-muted">{nameOf(message.senderId)}</p>
+                    )}
+                    {message.replyTo && (
+                      <a
+                        href={`/?post=${message.replyTo.id}`}
+                        className={`mb-1 flex items-center gap-2 rounded-xl border-l-2 border-accent bg-sunk px-2 py-1.5 text-[12px] text-muted transition-colors hover:text-ink ${
+                          mine ? "ml-auto" : ""
+                        }`}
+                        aria-label={`In reply to: ${message.replyTo.summary ?? "a post"}`}
+                      >
+                        {message.replyTo.thumbnail && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={message.replyTo.thumbnail} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                        )}
+                        <span className="line-clamp-2">{message.replyTo.summary ?? "A post"}</span>
+                      </a>
                     )}
                     {message.shortcode ? (
                       <SharePreview message={message} mine={mine} />

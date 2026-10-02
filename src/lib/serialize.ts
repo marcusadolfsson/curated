@@ -22,6 +22,8 @@ export type PostView = {
   reactionEmoji: string | null;
   suggestedReaction: string | null;
   replyText: string | null;
+  /** Your own note about the post, kept here only. */
+  note: string | null;
   draftReply: string | null;
   repliedAt: string | null;
   reactionError: string | null;
@@ -57,6 +59,7 @@ export function toPostView(post: Post): PostView {
     reactionEmoji: post.reactionEmoji,
     suggestedReaction: post.suggestedReaction,
     replyText: post.replyText,
+    note: post.note,
     draftReply: post.draftReply,
     repliedAt: post.repliedAt?.toISOString() ?? null,
     reactionError: post.reactionError,

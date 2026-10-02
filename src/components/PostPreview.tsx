@@ -39,6 +39,8 @@ type Props = {
   onToggleSaved: (id: number, saved: boolean) => Promise<void>;
   onReact: (id: number, emoji: string) => Promise<void>;
   onReply: (id: number, text: string) => Promise<string | null>;
+  /** Keep a note to yourself on the post; null takes it away. Stored here only. */
+  onNote?: (id: number, note: string | null) => Promise<void>;
   onChangeCategory: (id: number, category: string) => Promise<void>;
   /** False with no Claude credential: nothing is described or categorised. */
   describing?: boolean;
@@ -110,6 +112,7 @@ export default function PostPreview({
   onToggleSaved,
   onReact,
   onReply,
+  onNote,
   onChangeCategory,
   describing = true,
 }: Props) {
@@ -398,6 +401,7 @@ export default function PostPreview({
           onToggleSaved={onToggleSaved}
           onReact={onReact}
           onReply={onReply}
+          onNote={onNote}
           onChangeCategory={onChangeCategory}
           describing={describing}
         />
@@ -527,6 +531,7 @@ export default function PostPreview({
             onToggleSaved={onToggleSaved}
             onReact={onReact}
             onReply={onReply}
+            onNote={onNote}
             onChangeCategory={onChangeCategory}
             describing={describing}
             closeRef={closeRef}

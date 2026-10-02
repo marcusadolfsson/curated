@@ -107,7 +107,10 @@ export default function Travel() {
   );
   const everythingOpen = allKeys.length > 0 && allKeys.every((key) => expanded.has(key));
 
-  const patch = async (id: number, changes: { viewed?: boolean; saved?: boolean; category?: string }) => {
+  const patch = async (
+    id: number,
+    changes: { viewed?: boolean; saved?: boolean; category?: string; note?: string | null },
+  ) => {
     await fetch(`/api/posts/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -296,6 +299,7 @@ export default function Travel() {
             void load();
             return response.ok ? null : (body.error ?? "That reply did not send.");
           }}
+          onNote={(id, note) => patch(id, { note })}
           onChangeCategory={(id, category) => patch(id, { category })}
         />
       )}

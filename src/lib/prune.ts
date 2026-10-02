@@ -56,6 +56,8 @@ export async function pruneWatchedMedia(): Promise<{ videos: number; photos: num
       and(
         eq(posts.viewed, true),
         eq(posts.saved, false),
+        // A post you wrote a note about is one you mean to come back to.
+        isNull(posts.note),
         // A read post with no timestamp was read before the app recorded one:
         // old by definition.
         or(lt(posts.viewedAt, cutoff), isNull(posts.viewedAt)),
