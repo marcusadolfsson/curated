@@ -11,12 +11,23 @@ import { pauseState } from "@/lib/pause";
 /**
  * Reacts to the DM the post arrived in, and records what happened.
  *
- * `emoji` is the fallback. What actually gets sent is the emoji the model chose
- * while reading the post, because a heart on all of it reads as automation -
- * the specific one is the whole signal that somebody looked.
+ * Without a `chosen` emoji, what gets sent is the one the model picked while
+ * reading the post, because a heart on all of it reads as automation - the
+ * specific one is the whole signal that somebody looked - and `fallbackEmoji`
+ * only when it picked none. With one, that is what gets sent: somebody tapped
+ * it, and the model's guess must not overrule them. It did, until a second
+ * tap on a different emoji went out as the first one again.
  */
-export async function reactToPost(post: Post, fallbackEmoji: string): Promise<ReactionOutcome> {
-  let emoji = isReactionEmoji(post.suggestedReaction) ? (post.suggestedReaction as string) : null;
+export async function reactToPost(
+  post: Post,
+  fallbackEmoji: string,
+  chosen?: string | null,
+): Promise<ReactionOutcome> {
+  let emoji = isReactionEmoji(chosen)
+    ? (chosen as string)
+    : isReactionEmoji(post.suggestedReaction)
+      ? (post.suggestedReaction as string)
+      : null;
 
   // Posts described before the model was asked for an emoji have none stored.
   if (!emoji) {
@@ -28,6 +39,11 @@ export async function reactToPost(post: Post, fallbackEmoji: string): Promise<Re
   }
 
   emoji = emoji ?? fallbackEmoji;
+
+  // Instagram toggles: the same reaction sent twice takes it off again. A
+  // post already carrying this one has nothing to send - a double tap, or a
+  // retry, would otherwise undo it.
+  if (post.reactedAt && post.reactionEmoji === emoji) return { ok: true };
 
   if (!post.messageId) {
     return await record(post, { ok: false, error: "No message id was captured for this post." }, emoji);
