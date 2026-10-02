@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, inArray, isNull, like, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, like, or, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
 import { toPostView } from "@/lib/serialize";
@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
   if (state === "unread") scope.push(eq(posts.viewed, false));
   if (state === "read") scope.push(eq(posts.viewed, true));
   if (state === "saved") scope.push(eq(posts.saved, true));
+  if (state === "notes") scope.push(isNotNull(posts.note));
   if (category === UNCATEGORISED) {
     filters.push(isNull(posts.category));
   } else if (category && category !== "all") {
@@ -57,6 +58,7 @@ export async function GET(request: NextRequest) {
       like(posts.caption, term),
       like(posts.items, term),
       like(posts.authorUsername, term),
+      like(posts.note, term),
     );
     if (match) scope.push(match);
   }
@@ -88,7 +90,7 @@ export async function GET(request: NextRequest) {
   // The header totals stay global, so "12 unread" means the same thing
   // wherever you are standing.
   const everything = await db
-    .select({ viewed: posts.viewed, saved: posts.saved })
+    .select({ viewed: posts.viewed, saved: posts.saved, note: posts.note })
     .from(posts)
     .where(
       watched.length > 0
@@ -118,6 +120,7 @@ export async function GET(request: NextRequest) {
     total: everything.length,
     unread: everything.filter((row) => !row.viewed).length,
     saved: everything.filter((row) => row.saved).length,
+    notes: everything.filter((row) => row.note).length,
     shown: inScope.length,
     categories: counts,
     // Without a Claude credential nothing is described or categorised, and the

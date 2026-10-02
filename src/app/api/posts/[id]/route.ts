@@ -11,7 +11,12 @@ export const dynamic = "force-dynamic";
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const postId = Number(id);
-  const body = (await request.json()) as { viewed?: boolean; saved?: boolean; category?: string };
+  const body = (await request.json()) as {
+    viewed?: boolean;
+    saved?: boolean;
+    category?: string;
+    note?: string | null;
+  };
 
   const changes: Partial<typeof posts.$inferInsert> = {};
   if (typeof body.viewed === "boolean") {
@@ -33,9 +38,16 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     changes.placedAt = null;
   }
 
+  // A note to yourself. Stored here and nowhere else; empty takes it away.
+  if (body.note !== undefined) {
+    const note = typeof body.note === "string" ? body.note.trim().slice(0, 2000) : "";
+    changes.note = note || null;
+    changes.notedAt = note ? new Date() : null;
+  }
+
   if (Object.keys(changes).length === 0) {
     return NextResponse.json(
-      { error: "Send { viewed }, { saved } or { category }." },
+      { error: "Send { viewed }, { saved }, { category } or { note }." },
       { status: 400 },
     );
   }

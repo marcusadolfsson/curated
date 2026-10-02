@@ -79,6 +79,10 @@ export const posts = sqliteTable(
     analysisError: text("analysisError"),
     analyzedAt: integer("analyzedAt", { mode: "timestamp" }),
 
+    /** A note to yourself about the post. Kept here only; never sent anywhere. */
+    note: text("note"),
+    notedAt: integer("notedAt", { mode: "timestamp" }),
+
     // Where a travel post is, for the Travel list. `place` is the most specific
     // spot it names ("Igludorf, Zermatt"), `placeRegion` the destination it
     // belongs to and is grouped under ("Swiss Alps"), `placeCountry` the

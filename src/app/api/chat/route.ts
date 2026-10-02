@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
 import { lastEventFor } from "@/lib/watcher";
@@ -109,6 +109,40 @@ export async function GET(request: NextRequest) {
       : [];
     const byCode = new Map(known.map((p) => [p.shortcode, p]));
 
+    // What your replies were replies to. The API's thread carries no reply
+    // information at all, so the link is made from this side: a reply sent
+    // from a post is stored on that post, and a message of yours with the
+    // same words, within a day of it, is that reply. Replies made in
+    // Instagram itself cannot be matched this way and show as plain text.
+    const replied = await db
+      .select({
+        id: posts.id,
+        replyText: posts.replyText,
+        repliedAt: posts.repliedAt,
+        summary: posts.summary,
+        thumbnailFile: posts.thumbnailFile,
+      })
+      .from(posts)
+      .where(and(eq(posts.threadId, thread.threadId), isNotNull(posts.replyText)));
+    const replyFor = (message: { text: string | null; senderId: string | null; at: string | null }) => {
+      if (!me || message.senderId !== me || !message.text || !message.at) return null;
+      const at = Date.parse(message.at);
+      let best: (typeof replied)[number] | null = null;
+      for (const post of replied) {
+        if (post.replyText?.trim() !== message.text.trim() || !post.repliedAt) continue;
+        const gap = Math.abs(post.repliedAt.getTime() - at);
+        if (gap > 86_400_000) continue;
+        if (!best || gap < Math.abs((best.repliedAt as Date).getTime() - at)) best = post;
+      }
+      return best
+        ? {
+            id: best.id,
+            summary: best.summary,
+            thumbnail: best.thumbnailFile ? `/api/media/${best.thumbnailFile}` : null,
+          }
+        : null;
+    };
+
     return NextResponse.json({
       ...base,
       users,
@@ -116,6 +150,7 @@ export async function GET(request: NextRequest) {
         const post = message.shortcode ? (byCode.get(message.shortcode) ?? null) : null;
         return {
           ...message,
+          replyTo: replyFor(message),
           post: post
             ? {
                 id: post.id,

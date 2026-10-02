@@ -36,6 +36,8 @@ type Props = {
   onToggleSaved: (id: number, saved: boolean) => Promise<void>;
   onReact: (id: number, emoji: string) => Promise<void>;
   onReply: (id: number, text: string) => Promise<string | null>;
+  /** Keep a note to yourself on the post; null takes it away. Stored here only. */
+  onNote?: (id: number, note: string | null) => Promise<void>;
   onChangeCategory: (id: number, category: string) => Promise<void>;
   /** False with no Claude credential: no categories exist to choose between. */
   describing?: boolean;
@@ -91,6 +93,7 @@ export default function PostChrome({
   onToggleSaved,
   onReact,
   onReply,
+  onNote,
   onChangeCategory,
   describing = true,
   closeRef,
@@ -118,6 +121,32 @@ export default function PostChrome({
   const [replyError, setReplyError] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [hasDraft, setHasDraft] = useState(Boolean(post.draftReply));
+
+  // A note to yourself, from the same box: what you write either goes to the
+  // sender as a message, or stays here as a note. Never both, never sent.
+  const [note, setNote] = useState<string | null>(post.note);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const saveNote = (next: string | null) => {
+    if (!onNote) return;
+    const previous = note;
+    setNote(next);
+    setNoteError(null);
+    void onNote(post.id, next).catch(() => {
+      setNote(previous);
+      setNoteError("That note did not save.");
+    });
+  };
+  const addNote = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    saveNote(text);
+  };
+  const editNote = () => {
+    if (!note) return;
+    setDraft(note);
+    box.current?.focus();
+  };
 
   const senderName = post.senderUsername?.split(" ")[0] ?? "the sender";
 
@@ -320,6 +349,22 @@ export default function PostChrome({
           {replied}
         </p>
       )}
+      {note && (
+        <div className="mt-3 rounded-sm bg-sunk px-3 py-2">
+          <p className="whitespace-pre-wrap font-serif text-[14px] text-ink">
+            <span className="mr-1.5 font-sans text-[12px] text-muted">note</span>
+            {note}
+          </p>
+          <p className="mt-1 flex gap-3 text-[12px]">
+            <button type="button" onClick={editNote} className="text-muted underline-offset-4 hover:text-ink hover:underline">
+              Edit
+            </button>
+            <button type="button" onClick={() => saveNote(null)} className="text-muted underline-offset-4 hover:text-ink hover:underline">
+              Remove
+            </button>
+          </p>
+        </div>
+      )}
       {post.caption && (
         <p className="mt-4 border-t border-line pt-3 font-serif text-[13px] leading-relaxed text-muted">
           {post.caption}
@@ -368,6 +413,7 @@ export default function PostChrome({
       <label className="block">
         <span className="sr-only">Reply to the sender about this post</span>
         <textarea
+          ref={phone ? undefined : box}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           rows={2}
@@ -377,11 +423,12 @@ export default function PostChrome({
         />
       </label>
       <div className="mt-1.5 flex items-center justify-between gap-3 text-[12px]">
-        <span className={`min-w-0 truncate ${replyError ? "text-danger" : "text-muted"}`}>
+        <span className={`min-w-0 truncate ${replyError || noteError ? "text-danger" : "text-muted"}`}>
           {replyError ??
+            noteError ??
             (hasDraft && draft && !replied
               ? "A draft, from reading the post. Edit it before sending."
-              : "Replies on this post in the thread.")}
+              : "A message goes to the thread; a note stays here.")}
         </span>
         <span className="flex shrink-0 items-center gap-3">
           {!replied && post.analysisStatus === "done" && (
@@ -394,12 +441,22 @@ export default function PostChrome({
               {drafting ? "Thinking" : hasDraft ? "Another draft" : "Draft one"}
             </button>
           )}
+          {onNote && (
+            <button
+              type="button"
+              onClick={addNote}
+              disabled={!draft.trim()}
+              className="rounded-sm border border-line px-2.5 py-1 text-ink transition-colors hover:bg-sunk disabled:opacity-40"
+            >
+              {note ? "Save Note" : "Add Note"}
+            </button>
+          )}
           <button
             type="submit"
             disabled={!draft.trim()}
             className="rounded-sm bg-accent px-2.5 py-1 text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            Send
+            Send as Msg
           </button>
         </span>
       </div>
@@ -607,6 +664,22 @@ export default function PostChrome({
               {replied}
             </p>
           )}
+          {note && (
+            <div className="mt-2 rounded-xl border border-dashed border-white/20 px-3 py-2.5">
+              <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-white/90">
+                <span className="mr-1.5 text-[12px] text-white/45">note</span>
+                {note}
+              </p>
+              <p className="mt-1 flex gap-3 text-[12px]">
+                <button type="button" onClick={editNote} className="text-white/55 underline-offset-4 hover:text-white hover:underline">
+                  Edit
+                </button>
+                <button type="button" onClick={() => saveNote(null)} className="text-white/55 underline-offset-4 hover:text-white hover:underline">
+                  Remove
+                </button>
+              </p>
+            </div>
+          )}
           {post.caption && (
             <p className="mt-4 text-[13px] leading-relaxed text-white/45">{post.caption}</p>
           )}
@@ -638,8 +711,9 @@ export default function PostChrome({
               />
             </label>
             <div className="flex items-center justify-between gap-3 px-1 pt-1.5 text-[12px]">
-              <span className={`min-w-0 truncate ${replyError ? "text-danger" : "text-white/40"}`}>
+              <span className={`min-w-0 truncate ${replyError || noteError ? "text-danger" : "text-white/40"}`}>
                 {replyError ??
+                  noteError ??
                   (hasDraft && draft && !replied
                     ? "A draft, from reading the post. Edit it before sending."
                     : sent
@@ -657,12 +731,22 @@ export default function PostChrome({
                     {drafting ? "Thinking" : hasDraft ? "Another draft" : "Draft one"}
                   </button>
                 )}
+                {onNote && (
+                  <button
+                    type="button"
+                    onClick={addNote}
+                    disabled={!draft.trim()}
+                    className="rounded-full border border-white/25 px-3.5 py-1.5 text-[13px] text-white transition-opacity hover:bg-white/10 disabled:opacity-40"
+                  >
+                    {note ? "Save Note" : "Add Note"}
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={!draft.trim()}
                   className="rounded-full bg-accent px-3.5 py-1.5 text-[13px] font-medium text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
                 >
-                  Send
+                  Send as Msg
                 </button>
               </span>
             </div>
