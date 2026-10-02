@@ -22,6 +22,12 @@ export const DEFAULTS = {
   /** Analyse posts automatically as they are imported. */
   autoAnalyze: "true",
   /**
+   * Transcribe what is said in a reel on this Mac with Whisper, for the
+   * description to read. Needs whisper.cpp and its models; without them it
+   * does nothing.
+   */
+  transcribeReels: "true",
+  /**
    * Listen for new messages on the Instagram API's update feed and sync when
    * one arrives. Off, posts arrive only when you check by hand.
    */

@@ -79,6 +79,22 @@ export const posts = sqliteTable(
     analysisError: text("analysisError"),
     analyzedAt: integer("analyzedAt", { mode: "timestamp" }),
 
+    /**
+     * Dates the post is about, for Upcoming: JSON, a list of
+     * { start, end, kind, label } with ISO days. `datedAt` is when it was read
+     * for them, found or not; null means not yet.
+     */
+    dates: text("dates"),
+    datedAt: integer("datedAt", { mode: "timestamp" }),
+
+    /**
+     * What is said in a reel, transcribed on this Mac by Whisper, for the
+     * description to read alongside the cover and caption. `transcribedAt` is
+     * when that was tried, whether or not anything was said.
+     */
+    transcript: text("transcript"),
+    transcribedAt: integer("transcribedAt", { mode: "timestamp" }),
+
     /** A note to yourself about the post. Kept here only; never sent anywhere. */
     note: text("note"),
     notedAt: integer("notedAt", { mode: "timestamp" }),

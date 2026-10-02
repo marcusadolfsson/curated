@@ -415,6 +415,7 @@ async function locate(batch: Post[], regions: string[]): Promise<Located[]> {
     summary: post.summary,
     named: parseItems(post.items),
     caption: post.caption ? truncate(post.caption, 400) : null,
+    said: post.transcript ? truncate(post.transcript, 400) : null,
     author: post.authorUsername,
   }));
 

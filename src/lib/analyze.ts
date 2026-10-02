@@ -50,6 +50,7 @@ Work in this order, and fill the fields in this order.
    - "rich": real information - a place, a price, a time, a method, a list, a claim, a punchline.
    - "thin": a few words, a mood, a joke with no substance behind it.
    - "none": no caption, or nothing left once the packaging is gone.
+   When what is said in a reel is given, weigh it the same way and alongside the caption: in a reel it is often where the facts are - the place named out loud, the price, the steps. Judge captionStrength on the caption alone.
 
 2. READ THE PICTURE. Take what the caption leaves out or is vague about: what the thing actually is, where it is, what it is made of, what is happening. When the caption is thin or none the picture carries the whole line - never return a weak line just because the caption was weak.
 
@@ -126,6 +127,9 @@ export async function analyzePost(post: Post): Promise<AnalysisResult> {
     `Type: ${post.mediaType === "reel" ? "Reel (video)" : post.mediaType}`,
     post.authorUsername ? `Posted by: @${post.authorUsername}` : null,
     post.caption ? `Caption: ${truncate(post.caption, 2000)}` : "Caption: (none)",
+    post.transcript
+      ? `What is said in the reel (transcribed on this machine, may have small errors): ${truncate(post.transcript, 2500)}`
+      : null,
     post.messageText ? `The sender's own words with the share: ${truncate(post.messageText, 500)}` : null,
     hasImage
       ? `Image: ${mediaPath(post.thumbnailFile as string)} - read this file first; for a reel it is the cover frame.`
@@ -211,8 +215,9 @@ export async function analyzeAndStore(post: Post): Promise<AnalysisResult> {
         analysisCostUsd: result.costUsd,
         analysisError: null,
         analyzedAt: new Date(),
-        // A new description may name a different place, or none: read again.
+        // A new description may name a different place or date, or none: read again.
         placedAt: null,
+        datedAt: null,
       })
       .where(eq(posts.id, post.id));
   } else {
