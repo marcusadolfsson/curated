@@ -9,9 +9,10 @@ import type { TravelPost } from "@/app/api/travel/route";
 /**
  * Every travel post as a dot on a world map.
  *
- * Nearby posts gather into a circle carrying their count; zooming in breaks
- * a circle into the regions and then the places inside it, and a single dot
- * opens its post. The clustering is Leaflet.markercluster's, so the counts are
+ * Nearby posts gather into a circle carrying their count; tapping or zooming
+ * breaks a circle into the regions and then the places inside it, and a
+ * single dot opens its post. Whatever the map shows is reported back, so the
+ * list under it can follow the view as it pans and zooms. The clustering is Leaflet.markercluster's, so the counts are
  * whatever is close together at the current zoom - a continent from far out,
  * a valley up close - rather than a fixed country/region split.
  *
@@ -23,12 +24,12 @@ import type { TravelPost } from "@/app/api/travel/route";
 export default function TravelMap({
   posts,
   onOpen,
-  onSelect,
+  onViewChange,
 }: {
   posts: TravelPost[];
   onOpen: (post: TravelPost) => void;
-  /** A circle was tapped: the posts inside it, to list under the map. */
-  onSelect: (posts: TravelPost[]) => void;
+  /** The posts inside the area the map shows, whenever that changes. */
+  onViewChange: (posts: TravelPost[]) => void;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const map = useRef<LeafletMap | null>(null);
@@ -36,15 +37,39 @@ export default function TravelMap({
   // The latest handler, so markers made once still open the right thing.
   const open = useRef(onOpen);
   open.current = onOpen;
-  const select = useRef(onSelect);
-  select.current = onSelect;
-  /** Which post each marker stands for, so a circle can say what is in it. */
-  const postOf = useRef(new WeakMap<object, TravelPost>());
+  const report = useRef(onViewChange);
+  report.current = onViewChange;
+  const latest = useRef(posts);
+  latest.current = posts;
+
+  /** Tell the page which posts are inside the area on screen. */
+  function reportView() {
+    const instance = map.current;
+    if (!instance) return;
+    const bounds = instance.getBounds();
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    // Zoomed out far enough, the map shows more than one world across.
+    const everyLongitude = east - west >= 360;
+    report.current(
+      latest.current.filter((post) => {
+        if (post.lat === null || post.lng === null) return false;
+        if (post.lat < south || post.lat > north) return false;
+        if (everyLongitude) return true;
+        // The view can sit across the date line, or on a copy of the world.
+        const lng = ((((post.lng - west) % 360) + 360) % 360) + west;
+        return lng <= east;
+      }),
+    );
+  }
 
   // The map itself, once. Leaflet reaches for window, so it is loaded here
   // rather than at the top, where it would run during server rendering.
   useEffect(() => {
     let cancelled = false;
+    let resize: ResizeObserver | null = null;
     let dark: MediaQueryList | null = null;
     let onScheme: (() => void) | null = null;
 
@@ -80,10 +105,9 @@ export default function TravelMap({
 
       cluster.current = L.markerClusterGroup({
         showCoverageOnHover: false,
-        // A tap on a circle lists what is in it, and zooms in as well - also
-        // at the closest zoom, where posts at one spot used to fan out.
-        zoomToBoundsOnClick: false,
-        spiderfyOnMaxZoom: false,
+        // A tap on a circle zooms into it, and the list follows the view; at
+        // the closest zoom, posts at one spot fan out to be tapped one by one.
+        spiderfyOnMaxZoom: true,
         maxClusterRadius: 48,
         iconCreateFunction: (group) => {
           const count = group.getChildCount();
@@ -96,17 +120,16 @@ export default function TravelMap({
         },
       }).addTo(instance);
 
-      cluster.current.on("clusterclick", (event) => {
-        const group = (event as unknown as { layer: import("leaflet").MarkerCluster }).layer;
-        const inside = group
-          .getAllChildMarkers()
-          .map((marker) => postOf.current.get(marker))
-          .filter((post): post is TravelPost => Boolean(post));
-        select.current(inside);
-        if (instance.getZoom() < instance.getMaxZoom()) {
-          instance.fitBounds(group.getBounds(), { padding: [32, 32], maxZoom: instance.getMaxZoom() });
-        }
+      instance.on("moveend", reportView);
+
+      // The map can be made before its box has a size - the page lays out
+      // around it after the data arrives - and Leaflet measures once. Tell it
+      // whenever the box changes, and fit the world to the dots once it can.
+      resize = new ResizeObserver(() => {
+        instance.invalidateSize();
+        if (!fitted.current) draw(L);
       });
+      resize.observe(element.current);
 
       map.current = instance;
       draw(L);
@@ -114,6 +137,7 @@ export default function TravelMap({
 
     return () => {
       cancelled = true;
+      resize?.disconnect();
       if (dark && onScheme) dark.removeEventListener("change", onScheme);
       map.current?.remove();
       map.current = null;
@@ -143,14 +167,16 @@ export default function TravelMap({
       });
       marker.bindTooltip(escape(post.city ?? post.place ?? post.region), { direction: "top", offset: [0, -8] });
       marker.on("click", () => open.current(post));
-      postOf.current.set(marker, post);
       group.addLayer(marker);
     }
 
-    if (placed.length > 0 && !fitted.current) {
+    // Fitted only once the box has a size: fitting a zero-size map picks the
+    // closest zoom allowed and puts the world's dots somewhere in Africa.
+    if (placed.length > 0 && !fitted.current && instance.getSize().x > 0) {
       fitted.current = true;
       instance.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 4 });
     }
+    reportView();
   }
 
   /** Fit to the dots once, on the first draw, and leave the view alone after. */
