@@ -185,7 +185,10 @@ export default function TravelMap({
   return (
     <div
       ref={element}
-      className="travel-map h-[280px] w-full overflow-hidden rounded-xl ring-1 ring-line sm:h-[380px] [&_.travel-cluster]:cursor-pointer"
+      // isolate: Leaflet stacks its panes and controls up to z-index 1000,
+      // which floated the map over the post viewer opened on top of it. Its
+      // own stacking context keeps all of that inside the box.
+      className="travel-map isolate h-[280px] w-full overflow-hidden rounded-xl ring-1 ring-line sm:h-[380px] [&_.travel-cluster]:cursor-pointer"
       aria-label="Map of travel posts"
     />
   );
