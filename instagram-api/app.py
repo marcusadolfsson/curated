@@ -339,7 +339,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.3",
+    version="1.6.4",
     lifespan=lifespan,
 )
 
@@ -1006,7 +1006,8 @@ def _video_cache_path() -> Path:
     return AGENT_MSGS_DIR / "video_cache.json"
 
 
-def _video_cache_get(shortcode: str) -> Optional[str]:
+def _video_cache_get_entry(shortcode: str) -> Optional[dict]:
+    """Fresh cached video entry: {"video_url", "vcodec", "acodec"} or None."""
     try:
         cache = json.loads(_video_cache_path().read_text())
     except (OSError, json.JSONDecodeError):
@@ -1018,11 +1019,21 @@ def _video_cache_get(shortcode: str) -> Optional[str]:
         fresh = time.time() - entry["fetched_at"] < VIDEO_CACHE_TTL
     except (KeyError, TypeError):
         return None
-    url = entry.get("video_url")
-    return url if (fresh and url) else None
+    if not (fresh and entry.get("video_url")):
+        return None
+    return {
+        "video_url": entry["video_url"],
+        "vcodec": entry.get("vcodec"),
+        "acodec": entry.get("acodec"),
+    }
 
 
-def _video_cache_set(shortcode: str, video_url: str) -> None:
+def _video_cache_set(
+    shortcode: str,
+    video_url: str,
+    vcodec: Optional[str] = None,
+    acodec: Optional[str] = None,
+) -> None:
     path = _video_cache_path()
     try:
         cache = json.loads(path.read_text()) if path.exists() else {}
@@ -1030,7 +1041,12 @@ def _video_cache_set(shortcode: str, video_url: str) -> None:
         cache = {}
     if not isinstance(cache, dict):
         cache = {}
-    cache[shortcode] = {"fetched_at": time.time(), "video_url": video_url}
+    cache[shortcode] = {
+        "fetched_at": time.time(),
+        "video_url": video_url,
+        "vcodec": vcodec,
+        "acodec": acodec,
+    }
     if len(cache) > VIDEO_CACHE_MAX:
         for key in sorted(cache, key=lambda k: cache[k].get("fetched_at", 0))[
             : len(cache) - VIDEO_CACHE_MAX
@@ -1044,9 +1060,52 @@ def _video_cache_set(shortcode: str, video_url: str) -> None:
         pass
 
 
-def _extract_video_url(page_url: str) -> Optional[str]:
-    """Best progressive MP4 URL via yt-dlp, or None if the post has no video.
+def _probe_streams(cdn_url: str) -> Optional[tuple]:
+    """(vcodec, acodec) for a CDN URL via ffprobe, or None.
 
+    Downloads only enough of the file to read its stream headers.
+    Returns None on timeout/network failure or when probing fails.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error",
+             "-show_entries", "stream=codec_name,codec_type",
+             "-of", "csv=p=0", cdn_url],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    vcodec = acodec = None
+    for line in (proc.stdout or "").splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) != 2:
+            continue
+        name, ctype = parts
+        if ctype == "video" and vcodec is None:
+            vcodec = name
+        elif ctype == "audio" and acodec is None:
+            acodec = name
+    if vcodec is None:
+        return None
+    return (vcodec, acodec)
+
+
+def _extract_video_url(page_url: str) -> Optional[dict]:
+    """Best progressive MP4 URL with audio via yt-dlp.
+
+    Returns {"url", "vcodec", "acodec", "source"}, or None when no format
+    carries both video and audio. Selection:
+      1. yt-dlp formats with audio (acodec not none/missing) and H.264
+         video (vcodec starting avc1/h264), highest tbr first;
+      2. Instagram's progressive video_versions entries (highest type
+         first) — muxed H.264+AAC MP4s that yt-dlp reports without codec
+         metadata, so the probe below verifies them;
+      3. any yt-dlp format with both video and audio, highest tbr.
+    Every candidate is ffprobe-verified to actually contain video and
+    audio streams before being returned — a video-only stream is never
+    served. Returns None (the callers 422) rather than a silent file.
     Raises HTTPException(504/502) when extraction itself fails.
     """
     try:
@@ -1071,18 +1130,73 @@ def _extract_video_url(page_url: str) -> Optional[str]:
         raise HTTPException(
             status_code=502, detail="Video extraction returned bad JSON"
         ) from exc
+    def _is_mp4(f: dict) -> bool:
+        return "mp4" in (f.get("url") or "") or f.get("ext") == "mp4"
+
+    def _has_av(f: dict) -> bool:
+        return f.get("vcodec") not in (None, "none") and f.get("acodec") not in (
+            None,
+            "none",
+        )
+
+    def _is_h264(f: dict) -> bool:
+        vc = (f.get("vcodec") or "").lower()
+        return vc.startswith("avc1") or vc.startswith("h264")
+
+    def _by_tbr(candidates: list) -> list:
+        return sorted(candidates, key=lambda f: f.get("tbr") or 0, reverse=True)
+
+    def _verified(url: str) -> Optional[tuple]:
+        probe = _probe_streams(url)
+        if probe and probe[0] and probe[1]:
+            return probe
+        return None
+
     formats = data.get("formats") or []
-    best = None
-    for f in formats:
-        if f.get("vcodec") in (None, "none"):
+    with_av = [
+        f for f in formats if _has_av(f) and _is_mp4(f) and f.get("url")
+    ]
+
+    # 1. H.264 + audio, highest bitrate first.
+    for f in _by_tbr([x for x in with_av if _is_h264(x)]):
+        probe = _verified(f["url"])
+        if probe:
+            return {
+                "url": f["url"],
+                "vcodec": probe[0],
+                "acodec": probe[1],
+                "source": "yt-dlp",
+            }
+
+    # 2. Instagram's progressive video_versions (muxed H.264+AAC MP4s).
+    try:
+        media = _extract_post_json(page_url)
+    except HTTPException:
+        media = None
+    vv = (media or {}).get("video_versions") or []
+    for v in sorted(vv, key=lambda x: int(x.get("type") or 0), reverse=True):
+        vurl = v.get("url")
+        if not vurl:
             continue
-        fu = f.get("url") or ""
-        if "mp4" not in fu and f.get("ext") != "mp4":
-            continue
-        if best is None or (f.get("tbr") or 0) > (best.get("tbr") or 0):
-            best = f
-    if best and best.get("url"):
-        return best["url"]
+        probe = _verified(vurl)
+        if probe:
+            return {
+                "url": vurl,
+                "vcodec": probe[0],
+                "acodec": probe[1],
+                "source": "video_versions",
+            }
+
+    # 3. Any format with both video and audio.
+    for f in _by_tbr(with_av):
+        probe = _verified(f["url"])
+        if probe:
+            return {
+                "url": f["url"],
+                "vcodec": probe[0],
+                "acodec": probe[1],
+                "source": "yt-dlp",
+            }
     return None
 
 
@@ -1092,6 +1206,10 @@ def get_post_video(
 ) -> dict:
     """Direct MP4 URL for a shared reel/video post, via yt-dlp (no login).
 
+    Selection prefers a progressive MP4 with H.264 video + audio (highest
+    bitrate), then any MP4 with video + audio. A video-only stream is never
+    returned — the endpoint 422s when nothing with audio is available.
+
     Returns a short-lived CDN URL — download it promptly; re-request if it
     expires. Results are cached 6h per shortcode (the TTL is short because
     CDN URLs expire). Intended for occasional use (a few lookups a day),
@@ -1099,25 +1217,31 @@ def get_post_video(
     """
     kind, shortcode = _parse_share_url(url)
     target = f"https://www.instagram.com/{kind}/{shortcode}/"
-    cached = _video_cache_get(shortcode)
+    cached = _video_cache_get_entry(shortcode)
     if cached is not None:
         return {
             "shortcode": shortcode,
             "url": target,
-            "video_url": cached,
+            "video_url": cached["video_url"],
+            "vcodec": cached.get("vcodec"),
+            "acodec": cached.get("acodec"),
             "cached": True,
         }
-    video_url = _extract_video_url(target)
-    if not video_url:
+    result = _extract_video_url(target)
+    if not result:
         raise HTTPException(
             status_code=422,
-            detail="No playable video found (photo post, or Instagram withheld it)",
+            detail="No playable video found (photo post, no audio track, or Instagram withheld it)",
         )
-    _video_cache_set(shortcode, video_url)
+    _video_cache_set(
+        shortcode, result["url"], result.get("vcodec"), result.get("acodec")
+    )
     return {
         "shortcode": shortcode,
         "url": target,
-        "video_url": video_url,
+        "video_url": result["url"],
+        "vcodec": result.get("vcodec"),
+        "acodec": result.get("acodec"),
         "cached": False,
     }
 
@@ -1275,19 +1399,31 @@ def get_post_images(
     for entry in entries:
         if entry.get("media_type") == 2:  # video: reel or video carousel item
             code = entry.get("code") or shortcode
-            video_url = _video_cache_get(code)
-            if video_url is None:
-                video_url = _extract_video_url(
+            video = _video_cache_get_entry(code)
+            if video is None:
+                extracted = _extract_video_url(
                     f"https://www.instagram.com/p/{code}/"
                 )
-                if video_url:
-                    _video_cache_set(code, video_url)
-            if not video_url:
+                if extracted:
+                    _video_cache_set(
+                        code,
+                        extracted["url"],
+                        extracted.get("vcodec"),
+                        extracted.get("acodec"),
+                    )
+                    video = {
+                        "video_url": extracted["url"],
+                        "vcodec": extracted.get("vcodec"),
+                        "acodec": extracted.get("acodec"),
+                    }
+            if not video:
                 continue
             items.append(
                 {
                     "type": "video",
-                    "url": video_url,
+                    "url": video["video_url"],
+                    "vcodec": video.get("vcodec"),
+                    "acodec": video.get("acodec"),
                     "width": entry.get("original_width"),
                     "height": entry.get("original_height"),
                 }
