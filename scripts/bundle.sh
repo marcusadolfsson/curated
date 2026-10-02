@@ -34,21 +34,6 @@ cp -R .next/static "$OUT/.next/static"
 [ -d public ] && cp -R public "$OUT/public"
 cp -R drizzle "$OUT/drizzle"
 
-# Packages the trace cannot get right, copied whole.
-#
-# The tracer follows imports, so it takes a package's JavaScript and leaves the
-# files that package reads at runtime. playwright-core loads browsers.json to
-# find out which Chromium it wants, and the traced copy did not have it: the
-# app started, the watcher could not open a browser, and the only sign was a
-# module-not-found in the log. Copying the whole package is a few megabytes
-# against a failure that looks like something else entirely.
-for whole in playwright playwright-core; do
-  if [ -d "node_modules/$whole" ]; then
-    rm -rf "${OUT:?}/node_modules/$whole"
-    cp -R "node_modules/$whole" "$OUT/node_modules/$whole"
-  fi
-done
-
 # Next's own server runtimes, all of them.
 #
 # The trace picks the ones it can see being imported and misses the rest -

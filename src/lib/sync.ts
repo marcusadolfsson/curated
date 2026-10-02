@@ -2,25 +2,17 @@ import { analysisAvailable } from "@/lib/claude-auth";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, syncRuns, threads, type Post } from "@/db/schema";
-import {
-  RateLimitedError,
-  ScrapingWarningError,
-  SessionExpiredError,
-  getSessionStatus,
-  isSessionKnownDead,
-  ownIdentity,
-} from "@/lib/instagram/client";
+import { RateLimitedError, getSessionStatus, ownIdentity } from "@/lib/instagram/client";
 import { pauseAutomation, pauseState } from "@/lib/pause";
 import {
   collectSharedPosts,
   fetchInbox,
   fetchThread,
-  mediaIdFromShortcode,
   oldestMessageAt,
   type DmUser,
   type Json,
 } from "@/lib/instagram/dm";
-import { ApiUnavailableError, usingApi } from "@/lib/instagram/api";
+import { ApiUnavailableError } from "@/lib/instagram/api";
 import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
 import { fetchPostPreview } from "@/lib/instagram/preview";
@@ -92,18 +84,13 @@ export function startSync(): SyncState {
   Object.assign(state, idleState(), {
     running: true,
     phase: "connecting" as SyncPhase,
-    message: "Opening Instagram",
+    message: "Asking the Instagram API",
     startedAt: new Date().toISOString(),
   });
 
   void runSync().catch(async (error) => {
     // Instagram pushing back stops the automation rather than retrying it.
-    if (error instanceof ScrapingWarningError) {
-      await pauseAutomation(
-        "Instagram served a scraping warning, so everything stopped. Lift this by hand.",
-        48,
-      );
-    } else if (error instanceof RateLimitedError) {
+    if (error instanceof RateLimitedError) {
       await pauseAutomation(
         "Instagram rate-limited this host, so syncing stopped rather than pressing on.",
       );
@@ -140,14 +127,10 @@ async function runSync() {
     console.log(`[sync] released ${revived.length} post(s) stuck mid-analysis`);
   }
 
-  if (isSessionKnownDead()) {
-    return finish("error", "Signed out. Paste a new session cookie on the setup page.");
-  }
-
-  // Opens the inbox tab if it is not already open; that load is the check.
-  const session = await getSessionStatus({ verify: true });
+  // The API's own health check: local, no Instagram request.
+  const session = await getSessionStatus();
   if (!session.connected) {
-    return finish("error", session.message ?? "Not connected to Instagram. Sign in first.");
+    return finish("error", session.message ?? "The Instagram API is not answering.");
   }
 
   // 1. Refresh the thread list, keeping whatever is already marked as watched.
@@ -311,9 +294,7 @@ async function runSync() {
       }
     } catch (error) {
       if (
-        error instanceof SessionExpiredError ||
         error instanceof RateLimitedError ||
-        error instanceof ScrapingWarningError ||
         error instanceof ApiUnavailableError
       ) throw error;
       console.error(`[sync] thread ${threadId} failed:`, error);
@@ -367,19 +348,14 @@ async function prefetchVideos(postIds: number[]) {
   );
 
   for (const [index, post] of reels.entries()) {
-    const mediaId = post.mediaId ?? mediaIdFromShortcode(post.shortcode);
-    // Through the API the video is found by link, so no media id is needed.
-    if (!mediaId && !(await usingApi())) continue;
     if (index > 0) await pause(2_000, 6_000);
     state.message = `Fetching the reel (${index + 1} of ${reels.length})`;
     try {
-      const video = await fetchVideo(post.shortcode, mediaId ?? "");
+      const video = await fetchVideo(post.shortcode);
       if (video) await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
     } catch (error) {
       if (
-        error instanceof SessionExpiredError ||
         error instanceof RateLimitedError ||
-        error instanceof ScrapingWarningError ||
         error instanceof ApiUnavailableError
       ) throw error;
       console.error(`[sync] could not fetch the reel for ${post.shortcode}:`, error);

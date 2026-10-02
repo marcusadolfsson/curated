@@ -20,10 +20,10 @@ const nextConfig: NextConfig = {
 
   /**
    * Everything the app writes lives under ./data by default, inside the
-   * project. The tracer walks from the project root, found Chromium's profile
-   * in there and tried to copy a cache file with a colon in its name. None of
-   * it is input to the server, and the built bundle must never carry a session
-   * or a database into wherever it is installed.
+   * project. The tracer walks from the project root and once tried to copy a
+   * browser cache file it found in there. None of it is input to the server,
+   * and the built bundle must never carry a database into wherever it is
+   * installed.
    */
   outputFileTracingExcludes: {
     "**/*": [
@@ -40,8 +40,6 @@ const nextConfig: NextConfig = {
   // outside the server bundle.
   serverExternalPackages: [
     "better-sqlite3",
-    "playwright",
-    "playwright-core",
     "@anthropic-ai/claude-agent-sdk",
     "sharp",
   ],

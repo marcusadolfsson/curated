@@ -1,12 +1,11 @@
 # Running it on a Mac
 
-This is the path the app is built around. It runs as a **login agent**, not a
-daemon, because it drives a real Chromium and because the analysis agent uses
-the account's own Claude credentials. A daemon has neither.
-
-A Mac left switched on at home is a good host for this. The address Instagram
-sees is a residential one, and the browser is a genuine macOS Chromium whose
-user agent agrees with the machine underneath.
+This runs the server straight from a checkout, as a **login agent** rather than
+a daemon, because the analysis agent uses the account's own Claude credentials
+and a daemon has none. Curated.app does the same with its own copy of the
+server; use one or the other, never both. Instagram is read through the
+Instagram API - see [`docs/instagram-api.md`](../../docs/instagram-api.md) for
+standing that up and its tunnel to this Mac.
 
 ## 1. Node 22, not whatever is current
 
@@ -26,7 +25,6 @@ There is no need to make it your default node.
 git clone <your fork> ~/curated
 cd ~/curated
 npm ci
-npx playwright install chromium
 npm run build
 ```
 
@@ -73,8 +71,8 @@ serving from.
 
 ## 5. Do not let it sleep
 
-The app holds a browser tab open to hear about new messages, and that stops
-while the machine sleeps.
+The Instagram API reaches this Mac through a tunnel it holds open, and the
+tunnel dies while the machine sleeps.
 
 ```bash
 sudo pmset -a sleep 0 disksleep 0 womp 1
@@ -82,10 +80,10 @@ sudo pmset -a sleep 0 disksleep 0 womp 1
 
 Letting the display sleep is fine.
 
-## 6. Sign in
+## 6. Choose the conversations
 
-Open `http://localhost:3000/setup`, paste the `sessionid` cookie from a browser
-already signed in to Instagram, then pick which conversations to follow with
+With the Instagram API answering (`curl -s localhost:8000/health`), open
+`http://localhost:3000/setup` and pick which conversations to follow with
 *Refresh conversations*. With nothing ticked, every conversation is read.
 
 ## Reaching it from a phone

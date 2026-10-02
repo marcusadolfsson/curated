@@ -40,7 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // The server first, when this bundle carries one: everything else
             // is about watching it, so there is nothing to watch until it is
             // up. It declines to start if anything already answers on the port.
-            Browser.shared.check()
             Server.shared.startIfHosted(port: Poller.shared.config.localBase.port ?? 3000)
             Poller.shared.start()
             // Takes the assertion back if the toggle was left on.

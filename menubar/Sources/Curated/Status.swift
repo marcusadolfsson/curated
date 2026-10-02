@@ -16,10 +16,8 @@ import Foundation
 // not do".
 
 struct WatchPayload: Decodable {
-    /// "api" when it waits on the Instagram API's update feed rather than a
-    /// browser socket. Absent from older servers, which is the browser.
-    var via: String?
-    /// Through the API: when the API last checked Instagram's inbox.
+    /// When the Instagram API last checked Instagram's inbox: how fresh
+    /// "nothing new" is. The watcher itself only reads the API's cache.
     var upstreamCheckedAt: Date?
     var enabled: Bool
     var listening: Bool
@@ -33,13 +31,10 @@ struct WatchPayload: Decodable {
 }
 
 extension WatchPayload {
-    var throughApi: Bool { via == "api" }
-
-    /// The Watcher row. Through the API there are no sockets to count; what
-    /// matters is that the feed answers.
+    /// The Watcher row: whether the API's update feed answers.
     var summary: String {
         guard listening else { return enabled ? "not listening" : "disabled" }
-        return throughApi ? "listening via API" : "listening · \(Format.count(sockets, "socket"))"
+        return "listening via API"
     }
 }
 
@@ -75,10 +70,8 @@ struct SyncPayload: Decodable {
     var lastRun: LastRun?
 }
 
+/// Whether the Instagram API on Muse answers, and as whom.
 struct SessionPayload: Decodable {
-    /// "api" when Instagram is read through the Instagram API on Muse rather
-    /// than the app's own browser. Absent from older servers, which is "browser".
-    var source: String?
     var connected: Bool
     var username: String?
     var userId: String?
@@ -87,14 +80,9 @@ struct SessionPayload: Decodable {
 }
 
 extension SessionPayload {
-    var throughApi: Bool { source == "api" }
-
-    /// The Instagram row: who, and by which way in.
+    /// The Instagram row.
     var summary: String {
-        if throughApi {
-            return connected ? "via API as \(username ?? "?")" : "API not answering"
-        }
-        return connected ? "signed in as \(username ?? "?")" : "signed out"
+        connected ? "via API as \(username ?? "?")" : "API not answering"
     }
 }
 
@@ -128,26 +116,6 @@ enum Reachability: Equatable {
 
 // MARK: - Snapshot
 
-/// The sign-in window's state, while one is standing open.
-struct SignInPayload: Decodable {
-    var phase: String
-    var message: String
-    var username: String?
-    var startedAt: Date?
-    var paused: Bool
-
-    /// A window is up and the app is waiting on a person.
-    var working: Bool { ["opening", "waiting", "verifying"].contains(phase) }
-}
-
-/// What the server made of a pasted session cookie: "ok", "unverified" when
-/// it could not be checked yet, or "failed" with a reason.
-struct LoginOutcomePayload: Decodable {
-    var status: String
-    var username: String?
-    var message: String?
-}
-
 /// Whether the analysis half of the app has a credential. Never the token.
 struct ClaudeTokenPayload: Decodable {
     var ok: Bool
@@ -167,7 +135,6 @@ struct Snapshot {
     var watch: WatchPayload?
     var sync: SyncPayload?
     var session: SessionPayload?
-    var signIn: SignInPayload?
     var claude: ClaudeTokenPayload?
     var counts: CountsPayload?
 
@@ -215,17 +182,10 @@ extension Snapshot {
             return [Concern(health: .down, text: appError ?? "The app is not answering on localhost.")]
         }
 
-        // Signed out is the loudest thing this app can say. Nothing retries and
-        // nothing recovers on its own: a person has to paste a session cookie
-        // on the Setup page. Everything else here either heals or backs off.
+        // The API on Muse, or the tunnel it holds to this Mac, is down. Muse
+        // restarts both; nothing to do here but say so.
         if let session, !session.connected {
-            if session.throughApi {
-                // Not a sign-in: the API on Muse or its tunnel is down, and
-                // Muse restarts both. Nothing to do here but say so.
-                found.append(Concern(health: .attention, text: "The Instagram API is not answering. The tunnel from Muse may be down."))
-            } else {
-                found.append(Concern(health: .attention, text: "Signed out of Instagram. Paste a session cookie on the Setup page."))
-            }
+            found.append(Concern(health: .attention, text: "The Instagram API is not answering. The tunnel from Muse may be down."))
         }
 
         if let pause = sync?.pause, pause.paused {
@@ -274,9 +234,7 @@ extension Snapshot {
     var headline: String {
         if let first = concerns.first { return first.text }
         if let session, session.connected, let name = session.username {
-            return session.throughApi
-                ? "Everything healthy, reading \(name) through the API."
-                : "Everything healthy, signed in as \(name)."
+            return "Everything healthy, reading \(name) through the API."
         }
         return "Everything healthy."
     }

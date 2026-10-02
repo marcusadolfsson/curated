@@ -2,13 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { posts, threads } from "@/db/schema";
-import { lastEventFor } from "@/lib/api-watcher";
-import { health, usingApi } from "@/lib/instagram/api";
-import { isSessionKnownDead } from "@/lib/instagram/client";
+import { lastEventFor } from "@/lib/watcher";
+import { health } from "@/lib/instagram/api";
 import { collectMessages, fetchThread, type DmThread } from "@/lib/instagram/dm";
 import { sendMessage } from "@/lib/instagram/reply";
 import { pauseState } from "@/lib/pause";
-import { getSetting } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -48,13 +46,12 @@ async function chosenThread(threadId: string | null) {
 }
 
 /**
- * Through the API, the last read of each thread, kept briefly.
+ * The last read of each thread, kept briefly.
  *
- * The page asks every 45 seconds while it is open, and through the browser
- * that was a fetch in a tab already sitting on the inbox. Through the API
- * every read is a request to Instagram, so the page is answered from here
- * unless the listener has seen something new in this thread since, or the
- * copy is five minutes old.
+ * The page asks every 45 seconds while it is open, and every read is a
+ * request to Instagram, so the page is answered from here unless the watcher
+ * has seen something new in this thread since, or the copy is five minutes
+ * old.
  */
 const CHAT_CACHE_MS = 5 * 60_000;
 const globalForChat = globalThis as unknown as {
@@ -63,7 +60,6 @@ const globalForChat = globalThis as unknown as {
 const chatCache = (globalForChat.__chatCache ??= new Map());
 
 async function readForChat(threadId: string, threadFbid: string | null) {
-  if (!(await usingApi())) return fetchThread(threadId);
   const held = chatCache.get(threadId);
   const changed = lastEventFor(threadFbid);
   if (held && Date.now() - held.at < CHAT_CACHE_MS && (changed === null || changed <= held.at)) {
@@ -80,16 +76,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No conversation is being watched yet." }, { status: 404 });
   }
 
-  // The API names people by a different id from the browser's, so "me" has
-  // to come from the same place the messages do.
-  const me = (await usingApi())
-    ? (await health()).accountId
-    : (await getSetting("sessionUserId")).trim() || null;
+  // "Me" in the API's own ids, the ones its messages carry.
+  const me = (await health()).accountId;
   const base = { threadId: thread.threadId, title: thread.title, me };
 
-  if (isSessionKnownDead()) {
-    return NextResponse.json({ ...base, messages: [], error: "Signed out." }, { status: 200 });
-  }
   const paused = await pauseState();
   if (paused.paused) {
     return NextResponse.json({ ...base, messages: [], error: "Paused." }, { status: 200 });

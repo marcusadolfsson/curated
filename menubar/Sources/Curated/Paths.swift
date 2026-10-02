@@ -14,21 +14,6 @@ enum Paths {
 
     static var dataDirectory: URL { support }
 
-    /// Chromium, fetched once rather than carried. It is 356 MB, it is signed
-    /// by somebody else, and putting it inside a signed bundle means signing
-    /// every helper inside its framework - which is a great deal of work for
-    /// something that is really data.
-    ///
-    /// Playwright's own default location rather than somewhere under this
-    /// app's data. It is a cache: shared with any other Playwright on the
-    /// machine, safe to delete, and re-downloaded when it goes. Putting a
-    /// private copy beside the database would have meant this Mac downloading
-    /// a second 356 MB of the identical browser it already had.
-    static var browsersDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appending(path: "Library/Caches/ms-playwright")
-    }
-
     /// The analysis credential, outside the bundle and outside the repo, at
     /// mode 600. Written by the menu bar's own token field or by hand.
     static var claudeTokenPath: URL {

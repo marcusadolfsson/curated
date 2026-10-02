@@ -6,12 +6,9 @@ import AnalysisSettings from "@/components/AnalysisSettings";
 import SyncPanel from "@/components/SyncPanel";
 
 /**
- * The settings that are worth a page.
- *
- * Signing in and out moved to the menu bar, where the sign-in window opens
- * anyway - it drives the Mac's own browser, so it was never a thing a phone
- * could do on its own. What is left here is the part you sit down and think
- * about: whose messages to read, and how they get described.
+ * The settings that are worth a page: whose messages to read, and how they
+ * get described. The Instagram account itself is on Muse's side, through the
+ * API, and the Claude credential is in the menu bar.
  */
 export default function SetupPage() {
   return (

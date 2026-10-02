@@ -19,46 +19,24 @@ export const DEFAULTS = {
    * that slept for three days catches up on three days.
    */
   historyDays: "7",
-  /** Run Chromium headless. Turn off only when debugging on a desktop. */
-  headless: "true",
-  /**
-   * Send Instagram traffic through a proxy, e.g. socks5://192.168.1.10:1080.
-   * Empty means straight out of this host, which for a datacenter address is
-   * the thing Instagram objects to.
-   */
-  proxyServer: "",
-  proxyUsername: "",
-  proxyPassword: "",
   /** Analyse posts automatically as they are imported. */
   autoAnalyze: "true",
   /**
-   * Keep a page open on the DM inbox and sync the moment Instagram's realtime
-   * socket shows activity. Off by default: a permanently connected browser is
-   * a larger automation footprint, and Instagram has already warned this
-   * account once. Turn on deliberately, not by default.
+   * Listen for new messages on the Instagram API's update feed and sync when
+   * one arrives. Off, posts arrive only when you check by hand.
    */
   realtime: "false",
-  /**
-   * Write down what the inbox page fetches of its own accord, and nothing
-   * else. Off by default and not a feature: it is the evidence for whether
-   * the sync trigger's assumption holds, and whether the page's own payloads
-   * could be used instead of asking Instagram the same question twice. Shapes
-   * only - counts and timestamps, never message contents.
-   */
-  observePayloads: "false",
   /** React to each post in the DM thread once it has been read. */
   autoReact: "false",
   /** Used only when the model did not choose one. */
   reactionEmoji: "❤️",
-  /** Who the pasted session belongs to, read from the inbox page it loaded. */
+  /**
+   * The account's username, and its id from before the API: posts shared
+   * then carry it, so it is how the account's own shares are recognised.
+   */
   sessionUsername: "",
   sessionUserId: "",
-  /**
-   * Where Instagram is read from: "browser", the signed-in Chromium this app
-   * drives, or "api", the Instagram API on Muse reached through the tunnel.
-   * Never both - with "api" the browser refuses to start at all.
-   */
-  instagramSource: "browser",
+  /** Where the Instagram API answers - the far end of Muse's tunnel. */
   instagramApiBase: "http://127.0.0.1:8000",
   /** The newest `sent_at` the API listener has seen; it asks for what came after. */
   apiUpdatesSince: "",

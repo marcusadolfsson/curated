@@ -9,13 +9,13 @@ import type { DmThread, DmThreadSummary, DmUser, Json } from "./dm";
 import { RateLimitedError } from "./errors";
 
 /**
- * Instagram through the API on Muse, instead of through a browser.
+ * Instagram, through the Instagram API on Muse.
  *
  * The API is an authorised Meta product running on another machine, reached
  * through a reverse SSH tunnel that machine keeps open to this one, so it is
  * http://127.0.0.1:8000 from here. It answers in its own shapes; this module
- * turns them into the ones the rest of the app already reads, so sync,
- * backfill and the chat need no second code path.
+ * turns them into the ones the rest of the app reads - the DM item shape the
+ * parser in dm.ts was written against, when this app drove a browser.
  *
  * Every call here except /health and /dms/updates is a real request to
  * Instagram on the API's side, and that includes reads. The updates feed is
@@ -42,27 +42,6 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
-}
-
-const globalForApi = globalThis as unknown as { __igApiSource?: { value: boolean; at: number } };
-
-/**
- * Whether the app reads Instagram through the API rather than the browser.
- *
- * Read from settings, but cached for a few seconds: this sits in front of
- * every browser launch, and a database read per page fetch is not free.
- */
-export async function usingApi(): Promise<boolean> {
-  const cached = globalForApi.__igApiSource;
-  if (cached && Date.now() - cached.at < 5_000) return cached.value;
-  const value = (await getSetting("instagramSource")) === "api";
-  globalForApi.__igApiSource = { value, at: Date.now() };
-  return value;
-}
-
-/** For a settings change to apply at once rather than within five seconds. */
-export function forgetSourceCache() {
-  globalForApi.__igApiSource = undefined;
 }
 
 function apiKey(): string {

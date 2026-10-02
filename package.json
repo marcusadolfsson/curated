@@ -19,7 +19,6 @@
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
     "next": "16.1.1",
-    "playwright": "^1.62.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "sharp": "^0.35.4",

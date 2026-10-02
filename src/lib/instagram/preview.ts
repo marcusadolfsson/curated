@@ -1,7 +1,4 @@
-import { postByUrl, usingApi } from "./api";
-import { mediaIdFromShortcode } from "./dm";
-import { SessionExpiredError } from "./errors";
-import { fetchMediaInfo, largest } from "./gallery";
+import { postByUrl } from "./api";
 
 export type PostPreview = {
   mediaId: string | null;
@@ -13,40 +10,14 @@ export type PostPreview = {
 const EMPTY: PostPreview = { mediaId: null, imageUrl: null, caption: null, authorUsername: null };
 
 /**
- * Some shares arrive as a bare link with no media attached - a pasted URL, or a
- * preview card Instagram did not fill in. The shortcode in the link decodes to
- * the media id, and the media endpoint - the one the web client calls for any
- * post - gives back the cover, the caption and the author. Nothing is scraped
- * off a post page, which no real client fetches as XHR.
+ * A shared post's cover, caption and author, from its link.
+ *
+ * Every share arrives as a bare link, so this is how every post gets what the
+ * feed and the description need: the API resolves the link through
+ * Instagram's public oEmbed lookup, without the account, and caches it for a
+ * day. A deleted or private post comes back empty rather than failing a sync.
  */
-export async function fetchPostPreview(
-  shortcode: string,
-  knownMediaId?: string | null,
-): Promise<PostPreview> {
-  // Through the API every share arrives as a bare link, so this is how every
-  // post gets its cover and caption - from the link, by the API's public
-  // oEmbed lookup, without the account.
-  if (await usingApi()) {
-    const post = await postByUrl(`https://www.instagram.com/p/${shortcode}/`);
-    return post ? { ...post, mediaId: post.mediaId ?? knownMediaId ?? null } : EMPTY;
-  }
-
-  const mediaId = knownMediaId ?? mediaIdFromShortcode(shortcode);
-  if (!mediaId) return EMPTY;
-
-  try {
-    const item = await fetchMediaInfo(mediaId);
-    if (!item) return { ...EMPTY, mediaId };
-
-    const cover = item.carousel_media?.[0] ?? item;
-    return {
-      mediaId,
-      imageUrl: largest(cover.image_versions2?.candidates ?? [])?.url ?? null,
-      caption: item.caption?.text?.trim() || null,
-      authorUsername: item.user?.username ?? null,
-    };
-  } catch (error) {
-    if (error instanceof SessionExpiredError) throw error;
-    return { ...EMPTY, mediaId };
-  }
+export async function fetchPostPreview(shortcode: string, knownMediaId?: string | null): Promise<PostPreview> {
+  const post = await postByUrl(`https://www.instagram.com/p/${shortcode}/`);
+  return post ? { ...post, mediaId: post.mediaId ?? knownMediaId ?? null } : EMPTY;
 }

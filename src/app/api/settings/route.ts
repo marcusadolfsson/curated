@@ -13,9 +13,6 @@ export async function PUT(request: NextRequest) {
 
   const updates: Partial<Record<SettingKey, string>> = {};
   for (const key of Object.keys(DEFAULTS) as SettingKey[]) {
-    // Switching the source stops one side before starting the other; that
-    // is /api/source's job, and a plain settings save must not half-do it.
-    if (key === "instagramSource") continue;
     if (key in body && body[key] !== undefined && body[key] !== null) {
       updates[key] = String(body[key]);
     }

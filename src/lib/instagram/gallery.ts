@@ -1,215 +1,71 @@
 import fs from "node:fs";
 import path from "node:path";
 import { MEDIA_DIR, ensureDirs } from "@/lib/paths";
-import { postImages, postVideo, usingApi } from "./api";
-import { igFetch, igJson } from "./tab";
+import { postImages, postVideo } from "./api";
 
 /**
- * Every image in a post, not just the one that came in the message.
+ * Every image in a post, and a reel's video, kept next to the thumbnails.
  *
- * The DM payload carries a single still - the cover. For a carousel that is
- * image one of five, which is no use when you are looking at image three and
- * want to keep it. The media endpoint returns the lot, at full size, so they
- * are fetched once and cached next to the thumbnails.
+ * The share in a DM carries nothing but its link. The API looks the post up
+ * without the account and hands back signed CDN links - every entry of a
+ * carousel at full size, or a reel's mp4 - and the files come straight off
+ * the CDN, which serves whoever holds the link. Fetched once and kept, so
+ * looking at a post again costs nothing and keeps working after the links
+ * expire.
  */
 
 export type GalleryImage = { file: string; width: number; height: number };
 export type GalleryVideo = { file: string; width: number; height: number; duration: number };
 
-type Candidate = { url?: string; width?: number; height?: number };
-type VideoVersion = { url?: string; width?: number; height?: number; type?: number };
-
-export type MediaNode = {
-  media_type?: number;
-  video_duration?: number;
-  image_versions2?: { candidates?: Candidate[] };
-  carousel_media?: MediaNode[];
-  video_versions?: VideoVersion[];
-  caption?: { text?: string } | null;
-  user?: { username?: string };
-};
-
 /**
- * Everything Instagram knows about one post, the way the web client asks for it.
- *
- * Held briefly, because more than one caller wants it for the same post within
- * moments: importing a share with no thumbnail attached looks the post up, and
- * then fetching its reel looks the same post up again. Two identical requests
- * seconds apart are a small oddity, and the answer cannot have changed. Kept
- * only for minutes, since the URLs inside expire within hours.
+ * The photos of a post. Video entries in a carousel are skipped rather than
+ * shown as a still that pretends to be the post.
  */
-const INFO_MEMO_MS = 5 * 60_000;
-const INFO_MEMO_MAX = 200;
-const infoMemo = new Map<string, { at: number; item: MediaNode | null }>();
-
-export async function fetchMediaInfo(mediaId: string): Promise<MediaNode | null> {
-  // The media endpoint is the browser session's. Through the API there is no
-  // full-size gallery and no video file: the viewer plays the post in
-  // Instagram's own embed instead, so the galleries and reels built on this
-  // simply come back empty.
-  if (await usingApi()) return null;
-
-  const held = infoMemo.get(mediaId);
-  if (held && Date.now() - held.at < INFO_MEMO_MS) return held.item;
-
-  const data = await igJson<{ items?: MediaNode[] }>(`/api/v1/media/${mediaId}/info/`);
-  const item = data.items?.[0] ?? null;
-
-  if (infoMemo.size >= INFO_MEMO_MAX) {
-    const oldest = infoMemo.keys().next();
-    if (!oldest.done) infoMemo.delete(oldest.value);
-  }
-  infoMemo.set(mediaId, { at: Date.now(), item });
-  return item;
-}
-
-export async function fetchGallery(shortcode: string, mediaId: string): Promise<GalleryImage[]> {
+export async function fetchGallery(shortcode: string): Promise<GalleryImage[]> {
   ensureDirs();
+  const items = await postImages(`https://www.instagram.com/p/${shortcode}/`);
+  if (!items) return [];
 
-  // Through the API: every entry by link, without the account, and the files
-  // straight off the CDN. Same names and the same rule as below - video
-  // entries in a carousel are skipped - so the viewer cannot tell the two
-  // apart.
-  if (await usingApi()) {
-    const items = await postImages(`https://www.instagram.com/p/${shortcode}/`);
-    if (!items) return [];
-    const images: GalleryImage[] = [];
-    for (const [index, item] of items.entries()) {
-      if (item.type !== "image") continue;
-      const file = `${shortcode}-${index + 1}.jpg`;
-      const target = path.join(MEDIA_DIR, file);
-      if (!fs.existsSync(target)) {
-        const response = await fetch(item.url, { signal: AbortSignal.timeout(60_000) }).catch(() => null);
-        if (!response?.ok) continue;
-        const body = Buffer.from(await response.arrayBuffer());
-        if (body.length === 0) continue;
-        await fs.promises.writeFile(`${target}.part`, body);
-        await fs.promises.rename(`${target}.part`, target);
-      }
-      images.push({ file, width: item.width, height: item.height });
-    }
-    return images;
-  }
-
-  const item = await fetchMediaInfo(mediaId);
-  if (!item) return [];
-
-  const parts = item.carousel_media?.length ? item.carousel_media : [item];
   const images: GalleryImage[] = [];
-
-  for (const [index, part] of parts.entries()) {
-    // A carousel can mix video in; we cannot play those, so skip them rather
-    // than show a still that pretends to be the post.
-    if (part.video_versions?.length) continue;
-
-    const best = largest(part.image_versions2?.candidates ?? []);
-    if (!best?.url) continue;
-
+  for (const [index, item] of items.entries()) {
+    if (item.type !== "image") continue;
     const file = `${shortcode}-${index + 1}.jpg`;
-    const target = path.join(MEDIA_DIR, file);
-
-    if (!fs.existsSync(target)) {
-      const response = await igFetch(best.url);
-      if (!response.ok) continue;
-      await fs.promises.writeFile(target, response.body);
-    }
-
-    images.push({ file, width: best.width ?? 0, height: best.height ?? 0 });
+    if (!(await keep(item.url, file, 60_000))) continue;
+    images.push({ file, width: item.width, height: item.height });
   }
-
   return images;
 }
 
-/**
- * The reel itself.
- *
- * Instagram's embed will not play a reel - it shows a cover and a button that
- * leaves. The file behind it is an ordinary mp4 though, and the media endpoint
- * hands over the URL, so it can be fetched once and played here like any other
- * video.
- */
-export async function fetchVideo(shortcode: string, mediaId: string): Promise<GalleryVideo | null> {
+/** A reel's video. Null for a post with none, or one Instagram withholds. */
+export async function fetchVideo(shortcode: string): Promise<GalleryVideo | null> {
   ensureDirs();
-
-  // Through the API: it finds the video without the account, and the file
-  // comes straight off the CDN - signed for whoever holds the link, so no
-  // browser and no cookies. Saved under the same name as before, so the
-  // viewer and the pruning neither know nor care which way it came.
-  if (await usingApi()) {
-    const file = `${shortcode}.mp4`;
-    const target = path.join(MEDIA_DIR, file);
-    if (!fs.existsSync(target)) {
-      const url = await postVideo(`https://www.instagram.com/reel/${shortcode}/`);
-      if (!url) return null;
-      const response = await fetch(url, { signal: AbortSignal.timeout(180_000) }).catch(() => null);
-      if (!response?.ok) return null;
-      const body = Buffer.from(await response.arrayBuffer());
-      if (body.length === 0) return null;
-      // Written whole or not at all: a half-written file would read as cached.
-      await fs.promises.writeFile(`${target}.part`, body);
-      await fs.promises.rename(`${target}.part`, target);
-    }
-    return { file, width: 0, height: 0, duration: 0 };
-  }
-
-  const item = await fetchMediaInfo(mediaId);
-  const versions = item?.video_versions ?? [];
-  if (versions.length === 0) return null;
-
-  const best = phoneSized(versions);
-  if (!best?.url) return null;
-
   const file = `${shortcode}.mp4`;
-  const target = path.join(MEDIA_DIR, file);
-
-  if (!fs.existsSync(target)) {
-    const response = await igFetch(best.url);
-    if (!response.ok) return null;
-    await fs.promises.writeFile(target, response.body);
+  if (!fs.existsSync(path.join(MEDIA_DIR, file))) {
+    const url = await postVideo(`https://www.instagram.com/reel/${shortcode}/`);
+    if (!url || !(await keep(url, file, 180_000))) return null;
   }
-
-  return {
-    file,
-    width: best.width ?? 0,
-    height: best.height ?? 0,
-    duration: item?.video_duration ?? 0,
-  };
+  // The player reads the size and length off the file itself.
+  return { file, width: 0, height: 0, duration: 0 };
 }
 
 /**
- * The rendition worth fetching. Instagram offers the same clip at 1080, 720
- * and 480 wide; the widest is roughly twice the bytes of the 720 one and
- * looks the same in a modal on a phone, which is where these get watched.
- * The time before a reel starts is mostly the time to move its bytes -
- * from the CDN into the cache, then from here to the phone - so this is the
- * single biggest lever on it.
+ * Downloads a CDN link into the media folder, whole or not at all: written to
+ * a side file and renamed, so a half-written one can never read as cached.
  */
-const PREFERRED_MAX_WIDTH = 720;
-
-function phoneSized(versions: VideoVersion[]): VideoVersion | null {
-  const usable = versions.filter((version) => version.url);
-  if (usable.length === 0) return null;
-  const fitting = usable.filter((version) => (version.width ?? Infinity) <= PREFERRED_MAX_WIDTH);
-  const pool = fitting.length > 0 ? fitting : usable;
-  // Largest of those that fit; if none fit, the smallest there is.
-  return pool.reduce((chosen, version) =>
-    fitting.length > 0
-      ? (version.width ?? 0) > (chosen.width ?? 0) ? version : chosen
-      : (version.width ?? Infinity) < (chosen.width ?? Infinity) ? version : chosen,
-  );
+async function keep(url: string, file: string, timeoutMs: number): Promise<boolean> {
+  const target = path.join(MEDIA_DIR, file);
+  if (fs.existsSync(target)) return true;
+  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) }).catch(() => null);
+  if (!response?.ok) return false;
+  const body = Buffer.from(await response.arrayBuffer());
+  if (body.length === 0) return false;
+  await fs.promises.writeFile(`${target}.part`, body);
+  await fs.promises.rename(`${target}.part`, target);
+  return true;
 }
 
 export function videoIsCached(file: string | null): boolean {
   return Boolean(file) && fs.existsSync(path.join(MEDIA_DIR, file as string));
-}
-
-export function largest(candidates: Candidate[]): Candidate | null {
-  let best: Candidate | null = null;
-  for (const candidate of candidates) {
-    if (!candidate.url) continue;
-    if (!best || (candidate.width ?? 0) > (best.width ?? 0)) best = candidate;
-  }
-  return best;
 }
 
 /** True when every file we recorded is still on disk. */

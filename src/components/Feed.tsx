@@ -498,9 +498,8 @@ export default function Feed() {
 
       {session?.connected === false && (
         <p className="mb-4 border-l-2 border-danger pl-3 text-[13px] text-danger">
-          Not signed in to Instagram. Sign in from the Curated menu on the Mac -
-          it opens Instagram&apos;s own page in the browser this app uses, which is
-          why it cannot be done from here.
+          The Instagram API is not answering, so nothing new is coming in. The tunnel
+          from Muse may be down; it usually comes back by itself within minutes.
         </p>
       )}
 
@@ -645,8 +644,8 @@ function EmptyState({
       <div className="py-16">
         <p className="font-serif text-xl">Nothing here yet.</p>
         <p className="mt-2 max-w-[46ch] text-[14px] text-muted">
-          Sign in from the Curated menu on the Mac, then choose whose messages to follow
-          and check for new posts.
+          Once the Instagram API is answering, choose whose messages to follow and check
+          for new posts.
         </p>
         <Link
           href="/setup"

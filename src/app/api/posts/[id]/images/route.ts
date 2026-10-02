@@ -9,8 +9,6 @@ import {
   videoIsCached,
   type GalleryImage,
 } from "@/lib/instagram/gallery";
-import { usingApi } from "@/lib/instagram/api";
-import { mediaIdFromShortcode } from "@/lib/instagram/dm";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -25,74 +23,37 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   const [post] = await db.select().from(posts).where(eq(posts.id, Number(id))).limit(1);
   if (!post) return NextResponse.json({ error: "No such post." }, { status: 404 });
 
-  // A pasted link never carried a media id, but the shortcode is one in disguise.
-  const mediaId = post.mediaId ?? mediaIdFromShortcode(post.shortcode);
-
   // A reel: the mp4 itself, which Instagram's embed refuses to play.
-  const isVideo = post.mediaType === "reel" || post.mediaType === "tv";
-  if (isVideo) {
+  if (post.mediaType === "reel" || post.mediaType === "tv") {
     if (videoIsCached(post.videoFile)) {
       return NextResponse.json({ video: `/api/media/${post.videoFile}`, images: [] });
     }
-    // Through the API the video comes by link, not media id, so it is asked
-    // for whatever the post carries. When there is none to be had - a photo
-    // mislabelled, a video Instagram withholds - the viewer shows the cover
-    // and a way out rather than a failure.
-    if (await usingApi()) {
-      try {
-        const video = await fetchVideo(post.shortcode, mediaId ?? "");
-        if (video) {
-          await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
-          return NextResponse.json({ video: `/api/media/${video.file}`, images: [] });
-        }
-      } catch (error) {
-        console.error(`[gallery] could not fetch the video for ${post.shortcode}:`, error);
+    try {
+      const video = await fetchVideo(post.shortcode);
+      if (video) {
+        await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
+        return NextResponse.json({ video: `/api/media/${video.file}`, images: [] });
       }
-      return NextResponse.json({ video: null, images: [], reason: "api" });
+    } catch (error) {
+      console.error(`[gallery] could not fetch the video for ${post.shortcode}:`, error);
     }
-    if (mediaId) {
-      try {
-        const video = await fetchVideo(post.shortcode, mediaId);
-        if (video) {
-          await db.update(posts).set({ videoFile: video.file }).where(eq(posts.id, post.id));
-          return NextResponse.json({ video: `/api/media/${video.file}`, images: [] });
-        }
-      } catch (error) {
-        console.error(`[gallery] could not fetch the video for ${post.shortcode}:`, error);
-      }
-    }
-    return NextResponse.json({ video: null, images: [] });
+    // None to be had - a photo mislabelled, a video Instagram withholds: the
+    // viewer shows the cover and a way out to Instagram, not a failure.
+    return NextResponse.json({ video: null, images: [], reason: "api" });
   }
 
   const cached = parse(post.images);
   if (galleryIsCached(cached)) return NextResponse.json({ images: serve(cached) });
 
-  // Through the API the gallery is found by link, so a missing media id is
-  // no reason to settle for the cover.
-  const throughApi = await usingApi();
-  if (!mediaId && !throughApi) {
-    // Nothing to ask Instagram with; the message's own still is all there is.
-    return NextResponse.json({
-      images: post.thumbnailFile ? [{ url: `/api/media/${post.thumbnailFile}` }] : [],
-    });
-  }
-
+  const cover = post.thumbnailFile ? [{ url: `/api/media/${post.thumbnailFile}` }] : [];
   try {
-    const images = await fetchGallery(post.shortcode, mediaId ?? "");
-    if (images.length === 0) {
-      return NextResponse.json({
-        images: post.thumbnailFile ? [{ url: `/api/media/${post.thumbnailFile}` }] : [],
-      });
-    }
-
+    const images = await fetchGallery(post.shortcode);
+    if (images.length === 0) return NextResponse.json({ images: cover });
     await db.update(posts).set({ images: JSON.stringify(images) }).where(eq(posts.id, post.id));
     return NextResponse.json({ images: serve(images) });
   } catch (error) {
     console.error(`[gallery] could not fetch images for ${post.shortcode}:`, error);
-    return NextResponse.json({
-      images: post.thumbnailFile ? [{ url: `/api/media/${post.thumbnailFile}` }] : [],
-      error: error instanceof Error ? error.message : String(error),
-    });
+    return NextResponse.json({ images: cover, error: error instanceof Error ? error.message : String(error) });
   }
 }
 
