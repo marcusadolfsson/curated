@@ -16,9 +16,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
   const body = (await request.json().catch(() => ({}))) as { emoji?: string };
   const settings = await getSettings();
-  const emoji = body.emoji || settings.reactionEmoji;
-
-  const outcome = await reactToPost(post, emoji);
+  // The emoji tapped, when one was; otherwise the post's own suggestion.
+  const outcome = await reactToPost(post, settings.reactionEmoji, body.emoji ?? null);
   const [updated] = await db.select().from(posts).where(eq(posts.id, post.id)).limit(1);
 
   return NextResponse.json(
