@@ -385,7 +385,6 @@ export default function PostChrome({
           key={emoji}
           type="button"
           onClick={() => react(emoji)}
-          title={isSent ? `Sent ${emoji}` : means}
           aria-label={`React with ${emoji} - ${means}`}
           className={
             size === "bar"
@@ -423,13 +422,7 @@ export default function PostChrome({
         />
       </label>
       <div className="mt-1.5 flex items-center justify-between gap-3 text-[12px]">
-        <span className={`min-w-0 truncate ${replyError || noteError ? "text-danger" : "text-muted"}`}>
-          {replyError ??
-            noteError ??
-            (hasDraft && draft && !replied
-              ? "A draft, from reading the post. Edit it before sending."
-              : "A message goes to the thread; a note stays here.")}
-        </span>
+        <span className="min-w-0 truncate text-danger">{replyError ?? noteError}</span>
         <span className="flex shrink-0 items-center gap-3">
           {!replied && post.analysisStatus === "done" && (
             <button
@@ -446,7 +439,7 @@ export default function PostChrome({
               type="button"
               onClick={addNote}
               disabled={!draft.trim()}
-              className="rounded-sm border border-line px-2.5 py-1 text-ink transition-colors hover:bg-sunk disabled:opacity-40"
+              className="text-ink-soft underline-offset-4 hover:text-ink hover:underline disabled:opacity-40"
             >
               {note ? "Save Note" : "Add Note"}
             </button>
