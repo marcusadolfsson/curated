@@ -15,7 +15,7 @@ import {
 import { ApiUnavailableError } from "@/lib/instagram/api";
 import { fetchVideo, videoIsCached } from "@/lib/instagram/gallery";
 import { downloadAvatar, downloadThumbnail } from "@/lib/instagram/media";
-import { previewOrNull } from "@/lib/instagram/preview";
+import { coverMissing, fillPreview, previewOrNull } from "@/lib/instagram/preview";
 import { analyzeAndStore, analysisConcurrency } from "@/lib/analyze";
 import { datePending } from "@/lib/dates";
 import { locatePending } from "@/lib/places";
@@ -329,21 +329,8 @@ async function runSync() {
     // the next sync rather than being described blind.
     const ready: Post[] = [];
     for (const post of pending) {
-      if (post.thumbnailUrl || post.thumbnailFile || post.caption || post.authorUsername) {
-        ready.push(post);
-        continue;
-      }
-      const preview = await previewOrNull(post.shortcode, post.mediaId);
-      if (!preview) continue;
-      const fill = {
-        mediaId: post.mediaId ?? preview.mediaId,
-        caption: preview.caption,
-        authorUsername: preview.authorUsername,
-        thumbnailUrl: preview.imageUrl,
-        thumbnailFile: await downloadThumbnail(post.shortcode, preview.imageUrl).catch(() => null),
-      };
-      await db.update(posts).set(fill).where(eq(posts.id, post.id));
-      ready.push({ ...post, ...fill });
+      const filled = coverMissing(post) ? await fillPreview(post) : post;
+      if (filled) ready.push(filled);
     }
 
     state.phase = "analyzing";

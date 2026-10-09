@@ -1,5 +1,9 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { posts, type Post } from "@/db/schema";
 import { ApiUnavailableError, postByUrl } from "./api";
 import { RateLimitedError } from "./errors";
+import { downloadThumbnail } from "./media";
 
 export type PostPreview = {
   mediaId: string | null;
@@ -42,4 +46,28 @@ export async function previewOrNull(shortcode: string, knownMediaId?: string | n
     console.warn(`[preview] ${shortcode}: ${error instanceof Error ? error.message : error}`);
     return null;
   }
+}
+
+/** A post that went in while its cover lookup was failing: nothing to show or describe. */
+export function coverMissing(post: Post): boolean {
+  return !post.thumbnailUrl && !post.thumbnailFile && !post.caption && !post.authorUsername;
+}
+
+/**
+ * Looks up the cover, caption and author of a post that went in without them
+ * and stores what comes back. Null when the lookup failed again, so the post
+ * waits for the next sync or the next time it is opened.
+ */
+export async function fillPreview(post: Post): Promise<Post | null> {
+  const preview = await previewOrNull(post.shortcode, post.mediaId);
+  if (!preview) return null;
+  const fill = {
+    mediaId: post.mediaId ?? preview.mediaId,
+    caption: preview.caption,
+    authorUsername: preview.authorUsername,
+    thumbnailUrl: preview.imageUrl,
+    thumbnailFile: await downloadThumbnail(post.shortcode, preview.imageUrl).catch(() => null),
+  };
+  await db.update(posts).set(fill).where(eq(posts.id, post.id));
+  return { ...post, ...fill };
 }

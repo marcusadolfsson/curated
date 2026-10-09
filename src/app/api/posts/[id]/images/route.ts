@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { posts } from "@/db/schema";
+import { analyzeAndStore } from "@/lib/analyze";
+import { analysisAvailable } from "@/lib/claude-auth";
+import { coverMissing, fillPreview } from "@/lib/instagram/preview";
+import { asBool, getSetting } from "@/lib/settings";
 import {
   fetchGallery,
   fetchVideo,
@@ -20,8 +24,22 @@ export const maxDuration = 120;
  */
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const [post] = await db.select().from(posts).where(eq(posts.id, Number(id))).limit(1);
-  if (!post) return NextResponse.json({ error: "No such post." }, { status: 404 });
+  const [found] = await db.select().from(posts).where(eq(posts.id, Number(id))).limit(1);
+  if (!found) return NextResponse.json({ error: "No such post." }, { status: 404 });
+
+  // A post that arrived while the cover lookup was failing is blank until a
+  // sync comes along, which can be days. Being opened is reason enough to
+  // look again - once, now - and to describe it once there is something to go on.
+  let post = found;
+  if (coverMissing(found)) {
+    const filled = await fillPreview(found).catch(() => null);
+    if (filled) {
+      post = filled;
+      if (post.analysisStatus === "pending" && asBool(await getSetting("autoAnalyze")) && analysisAvailable()) {
+        void analyzeAndStore(post).catch((error) => console.error(`[gallery] describing ${post.shortcode}:`, error));
+      }
+    }
+  }
 
   // A reel: the mp4 itself, which Instagram's embed refuses to play.
   if (post.mediaType === "reel" || post.mediaType === "tv") {
