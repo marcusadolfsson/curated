@@ -60,6 +60,78 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
+
+_STABLE_PROXY_URL = "http://hatch-egress-proxy:3128"  # no-auth; set below
+_FALLBACK_PROXY_URL: Optional[str] = None  # original credentialed URL, if any
+
+
+def _pin_stable_egress_proxy() -> None:
+    """Pin the sandbox egress proxy to its static credential-free URL.
+
+    The sandbox rotates the proxy credential (~hourly) and this process
+    keeps its spawn-time value in os.environ. A stale credentialed URL does
+    not fail cleanly: the MITM relay truncates response bodies at exactly
+    4064 bytes (IncompleteRead) instead of returning 407. The relay works
+    fine without credentials (verified 2026-10-09 for instagram.com,
+    graph.facebook.com, cdninstagram.com), and the host itself never
+    rotates, so strip any credentials once at startup. This also covers
+    child processes (yt-dlp, instagram-cli), which inherit os.environ.
+
+    The original credentialed URL is kept as _FALLBACK_PROXY_URL: no-auth
+    may be a proxy misconfiguration rather than a promise, so if the proxy
+    ever starts demanding authentication (407), requests fall back to it.
+    """
+    global _STABLE_PROXY_URL, _FALLBACK_PROXY_URL
+    raw = (
+        os.environ.get("https_proxy")
+        or os.environ.get("HTTPS_PROXY")
+        or "http://hatch-egress-proxy:3128"
+    )
+    try:
+        parts = urllib.parse.urlsplit(raw)
+        host = parts.hostname or "hatch-egress-proxy"
+        port = f":{parts.port}" if parts.port else ""
+        if "@" in parts.netloc:
+            _FALLBACK_PROXY_URL = raw  # keep the credentialed URL just in case
+        _STABLE_PROXY_URL = f"http://{host}{port}"
+    except ValueError:
+        _STABLE_PROXY_URL = "http://hatch-egress-proxy:3128"
+    for key in (
+        "http_proxy", "https_proxy", "all_proxy",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    ):
+        os.environ[key] = _STABLE_PROXY_URL
+
+
+_pin_stable_egress_proxy()
+
+
+def _proxy_urlopen(req: urllib.request.Request, timeout: int):
+    """Open an HTTPS request through the pinned no-auth proxy.
+
+    Falls back to the credentialed proxy URL once if the proxy demands
+    authentication (407) — the no-auth relay may be a misconfiguration
+    rather than a promise. Any other failure propagates unchanged.
+    """
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler(
+            {"http": _STABLE_PROXY_URL, "https": _STABLE_PROXY_URL}
+        )
+    )
+    try:
+        return opener.open(req, timeout=timeout)
+    except OSError as exc:
+        # Proxy CONNECT rejection surfaces as OSError("Tunnel connection
+        # failed: 407 ..."), not HTTPError.
+        if "407" not in str(exc) or not _FALLBACK_PROXY_URL:
+            raise
+    fallback = urllib.request.build_opener(
+        urllib.request.ProxyHandler(
+            {"http": _FALLBACK_PROXY_URL, "https": _FALLBACK_PROXY_URL}
+        )
+    )
+    return fallback.open(req, timeout=timeout)
+
 API_KEY = os.environ.get("IG_API_KEY", "")
 PORT = int(os.environ.get("PORT", "8000"))
 
@@ -339,7 +411,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.4",
+    version="1.6.6",
     lifespan=lifespan,
 )
 
@@ -762,6 +834,7 @@ async def dm_updates(
         else:
             new = [m for m in messages if m.get("message_id") in last_cycle]
         if new or time.time() >= deadline:
+            _touch_mac_seen()
             return {
                 "messages": new,
                 "count": len(new),
@@ -930,7 +1003,7 @@ def _resolve_post_oembed(kind: str, shortcode: str) -> tuple:
     data = None
     for attempt in range(2):
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with _proxy_urlopen(req, timeout=20) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             break
         except urllib.error.HTTPError as exc:
@@ -1401,9 +1474,15 @@ def get_post_images(
             code = entry.get("code") or shortcode
             video = _video_cache_get_entry(code)
             if video is None:
-                extracted = _extract_video_url(
-                    f"https://www.instagram.com/p/{code}/"
-                )
+                try:
+                    extracted = _extract_video_url(
+                        f"https://www.instagram.com/p/{code}/"
+                    )
+                except HTTPException:
+                    # yt-dlp failed outright (e.g. no video formats found):
+                    # fall back to the still image below rather than failing
+                    # the whole carousel on one bad child.
+                    extracted = None
                 if extracted:
                     _video_cache_set(
                         code,
@@ -1416,18 +1495,24 @@ def get_post_images(
                         "vcodec": extracted.get("vcodec"),
                         "acodec": extracted.get("acodec"),
                     }
-            if not video:
+            if video:
+                items.append(
+                    {
+                        "type": "video",
+                        "url": video["video_url"],
+                        "vcodec": video.get("vcodec"),
+                        "acodec": video.get("acodec"),
+                        "width": entry.get("original_width"),
+                        "height": entry.get("original_height"),
+                    }
+                )
                 continue
-            items.append(
-                {
-                    "type": "video",
-                    "url": video["video_url"],
-                    "vcodec": video.get("vcodec"),
-                    "acodec": video.get("acodec"),
-                    "width": entry.get("original_width"),
-                    "height": entry.get("original_height"),
-                }
-            )
+            # Video extraction failed: serve the child's still image so one
+            # bad child doesn't fail the post; skip it only if there is no
+            # still image either.
+            img = _largest_image(entry)
+            if img:
+                items.append({"type": "image", **img})
         else:  # photo entry
             img = _largest_image(entry)
             if img:
@@ -1594,6 +1679,19 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _touch_mac_seen() -> None:
+    """Record that the Mac agent just polled us (for the outbox stall watch).
+
+    Touched on the endpoints the Mac polls (/dms/updates, /agent/outbox),
+    so the watcher can tell "Mac alive but not draining the outbox" apart
+    from "Mac asleep/offline". Best-effort: never raises.
+    """
+    try:
+        (AGENT_MSGS_DIR / "mac_last_seen").write_text(_utcnow())
+    except OSError:
+        pass
+
+
 class AgentInbound(BaseModel):
     sender: str = "mac-agent"
     text: str
@@ -1654,6 +1752,7 @@ def agent_outbox_get(
     mark_read: bool = False,
 ) -> dict:
     """Poll for replies. Use ?unread_only=true&mark_read=true to fetch-and-clear."""
+    _touch_mac_seen()
     msgs = _read_box("outbox")
     if unread_only:
         msgs = [m for m in msgs if not m.get("read")]
