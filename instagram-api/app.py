@@ -64,6 +64,11 @@ _load_dotenv()
 _STABLE_PROXY_URL = "http://hatch-egress-proxy:3128"  # no-auth; set below
 _FALLBACK_PROXY_URL: Optional[str] = None  # original credentialed URL, if any
 _PROXY_NEEDS_AUTH = False  # flipped True once the proxy demands auth (407)
+_PROXY_407_AT: Optional[str] = None  # UTC ISO time of the first 407, if any
+_PROXY_KEYS = (
+    "http_proxy", "https_proxy", "all_proxy",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+)
 
 
 def _pin_stable_egress_proxy() -> None:
@@ -97,10 +102,7 @@ def _pin_stable_egress_proxy() -> None:
         _STABLE_PROXY_URL = f"http://{host}{port}"
     except ValueError:
         _STABLE_PROXY_URL = "http://hatch-egress-proxy:3128"
-    for key in (
-        "http_proxy", "https_proxy", "all_proxy",
-        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-    ):
+    for key in _PROXY_KEYS:
         os.environ[key] = _STABLE_PROXY_URL
 
 
@@ -112,10 +114,66 @@ def _flag_proxy_needs_auth() -> None:
 
     Once set, new requests and subprocesses use the credentialed fallback
     URL instead of the no-auth one. One-way: a 407 is an auth demand, not
-    a transient error; a restart resets it.
+    a transient error; a restart resets it. Logs loudly exactly once.
     """
-    global _PROXY_NEEDS_AUTH
+    global _PROXY_NEEDS_AUTH, _PROXY_407_AT
+    if _PROXY_NEEDS_AUTH:
+        return
     _PROXY_NEEDS_AUTH = True
+    _PROXY_407_AT = datetime.now(timezone.utc).isoformat()
+    msg = (
+        "PROXY AUTH: egress proxy returned 407 — switching whole process "
+        "to credentialed proxy URL"
+    )
+    print(msg, flush=True)
+    try:
+        import logging
+        logging.getLogger("uvicorn.error").warning(msg)
+    except Exception:
+        pass
+
+
+def _is_proxy_auth_error(stderr_text: str) -> bool:
+    """True if a subprocess's stderr indicates proxy authentication failure.
+
+    Matches proxy-level 407s only — never Instagram-side errors (429, 4xx,
+    5xx, challenges, login pages), which must not trigger the fallback.
+    """
+    t = (stderr_text or "").lower()
+    if "407" not in t:
+        return False
+    return (
+        "proxy" in t
+        or "tunnel connection failed" in t
+        or "proxy authentication" in t
+    )
+
+
+def _run(cmd, **kwargs):
+    """subprocess.run with proxy-auth fallback.
+
+    Runs with the current proxy env; if the subprocess reports a proxy
+    authentication failure, flips the process-wide flag (loud log, once)
+    and retries once with the credentialed proxy URL. Instagram-side
+    failures pass through untouched — no retry.
+    """
+    kwargs.setdefault("env", _proxy_env_override())
+    try:
+        proc = subprocess.run(cmd, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise
+    if proc.returncode == 0 or not _FALLBACK_PROXY_URL:
+        return proc
+    err = proc.stderr or ""
+    if isinstance(err, bytes):
+        err = err.decode("utf-8", "replace")
+    if not _is_proxy_auth_error(err):
+        return proc
+    _flag_proxy_needs_auth()
+    env = dict(os.environ)
+    for key in _PROXY_KEYS:
+        env[key] = _FALLBACK_PROXY_URL
+    return subprocess.run(cmd, **{**kwargs, "env": env})
 
 
 def _proxy_env_override() -> Optional[dict]:
@@ -127,10 +185,7 @@ def _proxy_env_override() -> Optional[dict]:
     if not (_PROXY_NEEDS_AUTH and _FALLBACK_PROXY_URL):
         return None
     env = dict(os.environ)
-    for key in (
-        "http_proxy", "https_proxy", "all_proxy",
-        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-    ):
+    for key in _PROXY_KEYS:
         env[key] = _FALLBACK_PROXY_URL
     return env
 
@@ -194,9 +249,8 @@ def _detect_account() -> str:
     explicit = os.environ.get("IG_ACCOUNT_ID")
     if explicit:
         return explicit
-    proc = subprocess.run(
+    proc = _run(
         ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30,
-        env=_proxy_env_override(),
     )
     try:
         data = json.loads(proc.stdout)
@@ -210,10 +264,9 @@ def _detect_account() -> str:
 
 def _check_messages_connected(account_id: str) -> bool:
     try:
-        proc = subprocess.run(
+        proc = _run(
             ["instagram-messages-cli", "accounts"],
             capture_output=True, text=True, timeout=30,
-            env=_proxy_env_override(),
         )
         data = json.loads(proc.stdout)
         for acct in data.get("accounts") or []:
@@ -236,9 +289,8 @@ def run_cli(cli: str, *args: str, timeout: int = 120) -> Any:
     """Run an instagram CLI command and return its parsed JSON output."""
     cmd = [cli, *args, "--account-id", ACCOUNT_ID]
     try:
-        proc = subprocess.run(
+        proc = _run(
             cmd, capture_output=True, text=True, timeout=timeout,
-            env=_proxy_env_override(),
         )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(status_code=504, detail=f"{cli} timed out") from exc
@@ -453,7 +505,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.7",
+    version="1.6.8",
     lifespan=lifespan,
 )
 
@@ -471,14 +523,17 @@ def health() -> dict:
         "account_id": ACCOUNT_ID,
         "messages_connected": MESSAGES_CONNECTED,
         "dm_poller": poller,
+        "proxy": {
+            "mode": "credentialed" if _PROXY_NEEDS_AUTH else "no-auth",
+            "last_407_at": _PROXY_407_AT,
+        },
     }
 
 
 @app.get("/accounts", tags=["health"], dependencies=[Depends(require_api_key)])
 def accounts() -> Any:
-    proc = subprocess.run(
+    proc = _run(
         ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30,
-        env=_proxy_env_override(),
     )
     return json.loads(proc.stdout)
 
@@ -1183,7 +1238,7 @@ def _probe_streams(cdn_url: str) -> Optional[tuple]:
     Returns None on timeout/network failure or when probing fails.
     """
     try:
-        proc = subprocess.run(
+        proc = _run(
             ["ffprobe", "-v", "error",
              "-show_entries", "stream=codec_name,codec_type",
              "-of", "csv=p=0", cdn_url],
@@ -1233,7 +1288,6 @@ def _extract_video_url(page_url: str) -> Optional[dict]:
              "--compat-options", "no-certifi",
              "--socket-timeout", "30", page_url],
             capture_output=True, text=True, timeout=150,
-            env=_proxy_env_override(),
         )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(status_code=504, detail="Video extraction timed out") from exc
@@ -1427,12 +1481,11 @@ def _extract_post_json(page_url: str) -> dict:
     Raises HTTPException(504/502) when extraction itself fails.
     """
     try:
-        proc = subprocess.run(
+        proc = _run(
             ["python3", str(BASE_DIR / "extract_post_json.py"), page_url],
             capture_output=True,
             text=True,
             timeout=240,
-            env=_proxy_env_override(),
         )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(
