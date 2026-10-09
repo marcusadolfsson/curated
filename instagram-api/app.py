@@ -63,6 +63,7 @@ _load_dotenv()
 
 _STABLE_PROXY_URL = "http://hatch-egress-proxy:3128"  # no-auth; set below
 _FALLBACK_PROXY_URL: Optional[str] = None  # original credentialed URL, if any
+_PROXY_NEEDS_AUTH = False  # flipped True once the proxy demands auth (407)
 
 
 def _pin_stable_egress_proxy() -> None:
@@ -106,6 +107,34 @@ def _pin_stable_egress_proxy() -> None:
 _pin_stable_egress_proxy()
 
 
+def _flag_proxy_needs_auth() -> None:
+    """Record that the proxy demands authentication.
+
+    Once set, new requests and subprocesses use the credentialed fallback
+    URL instead of the no-auth one. One-way: a 407 is an auth demand, not
+    a transient error; a restart resets it.
+    """
+    global _PROXY_NEEDS_AUTH
+    _PROXY_NEEDS_AUTH = True
+
+
+def _proxy_env_override() -> Optional[dict]:
+    """Env override for child processes, or None to inherit.
+
+    Returns the credentialed proxy env once _PROXY_NEEDS_AUTH is set;
+    otherwise None (children inherit the pinned no-auth env).
+    """
+    if not (_PROXY_NEEDS_AUTH and _FALLBACK_PROXY_URL):
+        return None
+    env = dict(os.environ)
+    for key in (
+        "http_proxy", "https_proxy", "all_proxy",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    ):
+        env[key] = _FALLBACK_PROXY_URL
+    return env
+
+
 def _proxy_urlopen(req: urllib.request.Request, timeout: int):
     """Open an HTTPS request through the pinned no-auth proxy.
 
@@ -113,6 +142,13 @@ def _proxy_urlopen(req: urllib.request.Request, timeout: int):
     authentication (407) — the no-auth relay may be a misconfiguration
     rather than a promise. Any other failure propagates unchanged.
     """
+    if _PROXY_NEEDS_AUTH and _FALLBACK_PROXY_URL:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler(
+                {"http": _FALLBACK_PROXY_URL, "https": _FALLBACK_PROXY_URL}
+            )
+        )
+        return opener.open(req, timeout=timeout)
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler(
             {"http": _STABLE_PROXY_URL, "https": _STABLE_PROXY_URL}
@@ -125,6 +161,7 @@ def _proxy_urlopen(req: urllib.request.Request, timeout: int):
         # failed: 407 ..."), not HTTPError.
         if "407" not in str(exc) or not _FALLBACK_PROXY_URL:
             raise
+        _flag_proxy_needs_auth()
     fallback = urllib.request.build_opener(
         urllib.request.ProxyHandler(
             {"http": _FALLBACK_PROXY_URL, "https": _FALLBACK_PROXY_URL}
@@ -158,7 +195,8 @@ def _detect_account() -> str:
     if explicit:
         return explicit
     proc = subprocess.run(
-        ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30
+        ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30,
+        env=_proxy_env_override(),
     )
     try:
         data = json.loads(proc.stdout)
@@ -175,6 +213,7 @@ def _check_messages_connected(account_id: str) -> bool:
         proc = subprocess.run(
             ["instagram-messages-cli", "accounts"],
             capture_output=True, text=True, timeout=30,
+            env=_proxy_env_override(),
         )
         data = json.loads(proc.stdout)
         for acct in data.get("accounts") or []:
@@ -197,7 +236,10 @@ def run_cli(cli: str, *args: str, timeout: int = 120) -> Any:
     """Run an instagram CLI command and return its parsed JSON output."""
     cmd = [cli, *args, "--account-id", ACCOUNT_ID]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            env=_proxy_env_override(),
+        )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(status_code=504, detail=f"{cli} timed out") from exc
     if proc.returncode != 0:
@@ -411,7 +453,7 @@ app = FastAPI(
         "REST API for your connected Instagram account: DMs, posts, and reels. "
         "Send `X-API-Key` header with every request except /health."
     ),
-    version="1.6.6",
+    version="1.6.7",
     lifespan=lifespan,
 )
 
@@ -435,7 +477,8 @@ def health() -> dict:
 @app.get("/accounts", tags=["health"], dependencies=[Depends(require_api_key)])
 def accounts() -> Any:
     proc = subprocess.run(
-        ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30
+        ["instagram-cli", "accounts"], capture_output=True, text=True, timeout=30,
+        env=_proxy_env_override(),
     )
     return json.loads(proc.stdout)
 
@@ -1190,6 +1233,7 @@ def _extract_video_url(page_url: str) -> Optional[dict]:
              "--compat-options", "no-certifi",
              "--socket-timeout", "30", page_url],
             capture_output=True, text=True, timeout=150,
+            env=_proxy_env_override(),
         )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(status_code=504, detail="Video extraction timed out") from exc
@@ -1388,6 +1432,7 @@ def _extract_post_json(page_url: str) -> dict:
             capture_output=True,
             text=True,
             timeout=240,
+            env=_proxy_env_override(),
         )
     except subprocess.TimeoutExpired as exc:
         raise HTTPException(
